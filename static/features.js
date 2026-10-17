@@ -1,5 +1,5 @@
 'use strict';
-const feature={packet:null,part:0,copyJob:null,edit:null,cleanup:null,storage:[],storageJob:null};
+const feature={packet:null,part:0,copyJob:null,edit:null,cleanup:null,storage:[],storageJob:null,deleteJob:null};
 async function clipboard(text){
   try{await navigator.clipboard.writeText(text);return true;}catch{}
   // Legacy clipboard fallback; only runs on an explicit user action.
@@ -12,6 +12,7 @@ function renderEnhancements(){
   $('review-status').textContent=(j.recognition_version?count+' 段建议复核（不是准确率）':'旧版结果未评估疑似错词')+(j.revision?' / 已修订 '+j.revision+' 次':'')+(j.media_cleaned?' / 音视频已清理':'');
   $('recognize-again').disabled=j.status!=='done'||j.summary_status==='running';
   $('clean-job').disabled=!terminal.has(j.status)||j.summary_status==='running';
+  $('delete-job').disabled=!terminal.has(j.status)||j.summary_status==='running';
   $('copy-options').disabled=!j.transcript&&!j.summary;
   const audio=$('audio-player');visible('audio-player',!!j.media_available);
   if(j.media_available){const src='/api/jobs/'+j.id+'/source';if(audio.getAttribute('src')!==src)audio.src=src;}else{audio.pause();audio.removeAttribute('src');}
@@ -21,8 +22,45 @@ function renderEnhancements(){
     $('visual-note').textContent=j.local_video_available?'直接回看本地原视频；抽样截图可能遗漏内容。清理只影响应用缓存，不删除原文件。':'本地原文件已移动、删除或修改。已有文字、截图和保留的音轨仍可使用。';
     if(j.cache_cleaned)$('review-status').textContent+=' / 应用缓存已清理，原文件未改动';
   }
+  $('rewrite-script').value=j.rewrite_script||'';
+  const request=j.rewrite_request||{};
+  for(const [id,key] of [['rewrite-product','product'],['rewrite-audience','audience'],['rewrite-point','core_point'],['rewrite-duration','duration'],['rewrite-requirements','requirements']]){
+    if(document.activeElement!==$(id))$(id).value=request[key]||'';
+  }
+  $('rewrite-status').textContent=j.rewrite_status==='running'?'AI 正在生成原创口播稿…':j.rewrite_error||'';
+  $('generate-rewrite').disabled=j.status!=='done'||j.rewrite_status==='running';
+  $('copy-rewrite').disabled=!(j.rewrite_script||'').trim();
+  visible('rewrite-download',!!j.rewrite_script);$('rewrite-download').href=assetUrl('rewrite-script.txt');$('rewrite-download').download='AI原创口播稿.txt';
 }
 $('review-only').onchange=renderSegments;
+$('generate-rewrite').onclick=async()=>{
+  if(!state.health?.ai_configured){$('settings-button').click();return;}
+  $('generate-rewrite').disabled=true;
+  try{state.job=await api('/jobs/'+state.job.id+'/rewrite',{product:$('rewrite-product').value,audience:$('rewrite-audience').value,core_point:$('rewrite-point').value,duration:$('rewrite-duration').value,requirements:$('rewrite-requirements').value});state.lastRender='';render();}catch(e){toast(e.message);$('generate-rewrite').disabled=false;}
+};
+$('copy-rewrite').onclick=async()=>{if(await clipboard($('rewrite-script').value))toast('AI 改写稿已复制。');else{$('rewrite-script').select();toast('请按 Ctrl+C 复制。');}};
+$('save-rewrite').onclick=async()=>{try{state.job=await api('/jobs/'+state.job.id+'/rewrite-script',{text:$('rewrite-script').value});state.lastRender='';render();toast('改写稿已保存；原始逐字稿未改动。');}catch(e){toast(e.message);}};
+function currentSpokenScript(){return state.job.spoken_script||state.job.transcript||'';}
+async function copySpokenScript(){
+  const text=$('spoken-script-dialog').open?$('spoken-script-text').value:currentSpokenScript();
+  if(!text.trim())return toast('还没有可复制的口播稿。');
+  if(await clipboard(text))toast('纯文本口播稿已复制，可直接粘贴到剪映或文生音频工具。');
+  else{ $('spoken-script-text').value=text;$('spoken-script-dialog').showModal();$('spoken-script-text').select();toast('浏览器未允许自动复制，请按 Ctrl+C。'); }
+}
+$('edit-spoken-script').onclick=()=>{
+  if(!state.job.transcript)return toast('文字稿尚未完成。');
+  $('spoken-script-text').value=currentSpokenScript();visible('spoken-script-error',false);$('spoken-script-dialog').showModal();
+};
+$('copy-spoken-script').onclick=copySpokenScript;
+$('copy-spoken-script-dialog').onclick=copySpokenScript;
+$('save-spoken-script').onclick=async()=>{
+  $('save-spoken-script').disabled=true;visible('spoken-script-error',false);
+  try{
+    const job=await api('/jobs/'+state.job.id+'/spoken-script',{text:$('spoken-script-text').value});
+    state.job=job;state.lastRender='';render();$('spoken-script-dialog').close();toast('人工口播稿已保存；原始逐字稿未改动。');
+  }catch(e){$('spoken-script-error').textContent=e.message;visible('spoken-script-error',true);}
+  finally{$('save-spoken-script').disabled=false;}
+};
 async function loadPacket(){
   feature.packet=await api('/jobs/'+feature.copyJob+'/handoff?format='+$('copy-format').value+'&max_chars='+$('copy-limit').value);
   feature.part=0;showPacket();
@@ -67,21 +105,38 @@ $('copy-picture').onclick=async()=>{
   }catch(e){toast(e.message||'图片复制失败，可以下载拼图后上传。');}
   finally{$('copy-picture').disabled=false;}
 };
-function openEditor(index){
-  const j=state.job,s=j.segments[index];feature.edit={id:j.id,index,revision:j.revision||0,start:s.start};
-  $('edit-text').value=s.text;$('edit-info').textContent=fmt(s.start)+' – '+fmt(s.end)+(s.review_reasons?.length?' / '+s.review_reasons.join('；'):'');
-  visible('edit-error',false);visible('edit-audio',!!j.media_available);
-  const audio=$('edit-audio');audio.pause();
-  if(j.media_available){audio.src='/api/jobs/'+j.id+'/source';audio.onloadedmetadata=()=>{audio.currentTime=Math.max(0,s.start-.4);};audio.load();}
-  $('edit-dialog').showModal();
+function beginInlineEditor(index,row,text){
+  const j=state.job,s=j.segments[index];
+  if(!s)return toast('文字稿刚刚刷新，请再点击一次“核对 / 修正”。');
+  document.querySelectorAll('.segment-editing').forEach(el=>el.closest('.segment')?.querySelector('.inline-cancel')?.click());
+  feature.edit={id:j.id,index,revision:j.revision||0};
+  row.classList.add('segment-editing');
+  const input=node('textarea',undefined,'inline-segment-input');
+  input.value=s.text;input.rows=2;input.maxLength=4000;input.setAttribute('aria-label','修正 '+fmt(s.start)+' 的文字');
+  const actions=node('span',undefined,'inline-edit-actions');
+  const cancel=node('button','×','inline-cancel');cancel.type='button';cancel.title='取消修改';cancel.setAttribute('aria-label','取消修改');
+  const save=node('button','✓','inline-save');save.type='button';save.title='保存修正';save.setAttribute('aria-label','保存修正');
+  const finish=async()=>{
+    if(save.disabled)return;
+    save.disabled=cancel.disabled=true;
+    try{
+      const e=feature.edit;
+      const updated=await api('/jobs/'+e.id+'/edit',{revision:e.revision,changes:[{index:e.index,text:input.value}]});
+      if(state.selected===e.id){state.job=updated;state.lastRender='';render();}
+      toast('修正已保存；原稿和修订记录已保留。');
+    }catch(error){
+      save.disabled=cancel.disabled=false;toast(error.message);
+    }
+  };
+  cancel.onclick=()=>renderSegments();save.onclick=finish;
+  input.onkeydown=event=>{
+    if(event.key==='Escape'){event.preventDefault();cancel.click();}
+    if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();finish();}
+    // Ctrl+Z / Cmd+Z intentionally uses the browser's native textarea undo stack.
+  };
+  text.replaceWith(input);row.querySelector('.edit-segment').replaceWith(actions);actions.append(cancel,save);
+  input.focus();input.setSelectionRange(input.value.length,input.value.length);
 }
-$('edit-dialog').addEventListener('close',()=>$('edit-audio').pause());
-$('save-edit').onclick=async()=>{
-  $('save-edit').disabled=true;visible('edit-error',false);
-  try{const e=feature.edit;const j=await api('/jobs/'+e.id+'/edit',{revision:e.revision,changes:[{index:e.index,text:$('edit-text').value}]});if(state.selected===e.id){state.job=j;state.lastRender='';render();}$('edit-dialog').close();toast('修正已保存；原稿和修订记录已保留。');}
-  catch(e){$('edit-error').textContent=e.message;visible('edit-error',true);}
-  finally{$('save-edit').disabled=false;}
-};
 $('recognize-again').onclick=()=>{
   const j=state.job;feature.redoJob=j.id;$('redo-profile').value=j.profile==='balanced'?'accurate':'balanced';
   $('redo-language').value=j.language||'';$('redo-terms').value=j.hotwords||'';
@@ -114,6 +169,22 @@ async function openStorage(jid=null){
 }
 $('storage-button').onclick=()=>openStorage().catch(e=>toast(e.message));
 $('clean-job').onclick=()=>openStorage(state.job.id).catch(e=>toast(e.message));
+function openDeleteJob(id){
+  feature.deleteJob=id;
+  $('delete-job-dialog').showModal();
+}
+$('delete-job').onclick=()=>{if(state.job)openDeleteJob(state.job.id);};
+$('confirm-delete-job').onclick=async()=>{
+  const id=feature.deleteJob;if(!id)return;
+  $('confirm-delete-job').disabled=true;
+  try{
+    await api('/jobs/'+id+'/delete',{});
+    if(state.selected===id){state.selected=null;state.job=null;localStorage.removeItem('video.selected');}
+    state.jobs=await api('/jobs');renderHistory();visible('result',false);visible('empty',true);
+    feature.deleteJob=null;$('delete-job-dialog').close();toast('这条生成记录及应用缓存已删除。');
+  }catch(e){toast(e.message);}
+  finally{$('confirm-delete-job').disabled=false;}
+};
 $('storage-select-all').onchange=()=>{document.querySelectorAll('#storage-jobs input:not(:disabled)').forEach(c=>c.checked=$('storage-select-all').checked);resetPlan();};
 $('cleanup-scope').onchange=resetPlan;
 $('preview-cleanup').onclick=async()=>{

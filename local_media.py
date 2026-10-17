@@ -1,6 +1,7 @@
 """Read-only references to explicitly selected local media. Sources are never owned."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -69,5 +70,35 @@ root.destroy();print(json.dumps({'path':path},ensure_ascii=True))
         return json.loads(result.stdout)
     except subprocess.TimeoutExpired as exc:
         raise ValueError('文件选择超时，请重试或直接粘贴完整路径') from exc
+    finally:
+        _PICKER_LOCK.release()
+
+
+def save_video_copy(source, suggested_name):
+    """Open a native Save As dialog only after the user explicitly clicks save."""
+    source = Path(source).resolve(strict=True)
+    if not source.is_file() or source.suffix.lower() != '.mp4':
+        raise ValueError('可保存的视频缓存不存在，请重新处理该链接')
+    if not _PICKER_LOCK.acquire(blocking=False):
+        raise ValueError('文件选择窗口已经打开，请先完成选择')
+    script = """import json, tkinter as tk
+from tkinter import filedialog
+root=tk.Tk();root.withdraw();root.attributes('-topmost',True)
+path=filedialog.asksaveasfilename(title='保存视频',initialfile=%r,defaultextension='.mp4',filetypes=[('MP4 视频','*.mp4')])
+root.destroy();print(json.dumps({'path':path},ensure_ascii=True))
+""" % suggested_name
+    try:
+        result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=180,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0) if os.name == 'nt' else 0)
+        if result.returncode:
+            raise ValueError('无法打开保存位置窗口，请稍后重试')
+        target = json.loads(result.stdout).get('path', '')
+        if not target:
+            return {'saved': False}
+        destination = Path(target).resolve()
+        if destination.suffix.lower() != '.mp4':
+            destination = destination.with_suffix('.mp4')
+        shutil.copy2(source, destination)
+        return {'saved': True, 'name': destination.name}
     finally:
         _PICKER_LOCK.release()

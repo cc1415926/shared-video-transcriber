@@ -5,7 +5,19 @@ import threading
 _LOCK = threading.Lock()
 _MODEL = None
 _KEY = None
+_CONVERTER = None
 MODELS = {'tiny', 'base', 'small', 'medium', 'large-v3'}
+
+
+def simplified(text):
+    """Normalize ASR's Traditional Chinese output for the default Chinese UI."""
+    global _CONVERTER
+    if not text:
+        return text
+    if _CONVERTER is None:
+        from opencc import OpenCC
+        _CONVERTER = OpenCC('t2s')
+    return _CONVERTER.convert(text)
 
 
 def transcribe(path, model_size='small', language=None, hotwords='', on_segment=None, on_status=None, cancelled=None):
@@ -41,10 +53,10 @@ def transcribe(path, model_size='small', language=None, hotwords='', on_segment=
         result = []
         for seg in segments:
             check()
-            item = {'start': round(float(seg.start), 3), 'end': round(float(seg.end), 3), 'text': seg.text.strip()}
+            item = {'start': round(float(seg.start), 3), 'end': round(float(seg.end), 3), 'text': simplified(seg.text.strip())}
             reasons = []
             words = getattr(seg, 'words', None) or []
-            low_words = [w.word.strip() for w in words if w.probability < .45 and w.word.strip()]
+            low_words = [simplified(w.word.strip()) for w in words if w.probability < .45 and w.word.strip()]
             if getattr(seg, 'avg_logprob', 0) < -.8:
                 reasons.append('整段识别把握较低')
             if low_words:
@@ -55,7 +67,7 @@ def transcribe(path, model_size='small', language=None, hotwords='', on_segment=
                 reasons.append('可能受静音或背景声影响')
             item.update(needs_review=bool(reasons), review_reasons=reasons,
                         avg_logprob=round(float(getattr(seg, 'avg_logprob', 0)), 3),
-                        words=[{'start':round(w.start,3), 'end':round(w.end,3), 'text':w.word,
+                        words=[{'start':round(w.start,3), 'end':round(w.end,3), 'text':simplified(w.word),
                                 'probability':round(w.probability,3)} for w in words])
             if item['text']:
                 result.append(item)

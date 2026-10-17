@@ -68,6 +68,24 @@ _TRANSCRIBE_EXECUTOR = ThreadPoolExecutor(max_workers=1)
 WHISPER_MODEL = "tiny"
 _ALLOWED_MODELS = {"tiny", "base", "small", "medium", "large-v3"}
 _DETAIL_RESPONSE_TIMEOUT = 18.0
+
+
+def _playwright_chromium_executable() -> str | None:
+    """Use an explicitly configured or already-installed Playwright Chromium.
+
+    Windows machines can retain a newer Playwright browser cache after a Python
+    dependency upgrade.  Falling back to that cache is safer than asking the
+    user to download another 180 MB browser, and never searches arbitrary
+    locations.
+    """
+    configured = os.environ.get("VIDEO_PLAYWRIGHT_CHROMIUM", "").strip()
+    if configured and Path(configured).is_file():
+        return configured
+    local = os.environ.get("LOCALAPPDATA")
+    if not local:
+        return None
+    candidates = list((Path(local) / "ms-playwright").glob("chromium-*/chrome-win64/chrome.exe"))
+    return str(max(candidates, key=lambda item: item.parent.parent.stat().st_mtime)) if candidates else None
 _DETAIL_RESPONSE_RETRIES = 1
 _BILIBILI_VIDEO_FORMAT = (
     "bv*[vcodec^=avc1][ext=mp4]+ba[ext=m4a]/"
@@ -128,7 +146,16 @@ async def _get_video_object(page_url: str) -> dict:
 
     for attempt in range(_DETAIL_RESPONSE_RETRIES):
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            try:
+                browser = await p.chromium.launch(headless=True)
+            except Exception as launch_error:
+                executable = _playwright_chromium_executable()
+                if not executable:
+                    raise RuntimeError(
+                        "Playwright Chromium 未安装。运行 .venv\\Scripts\\python.exe -m playwright install chromium，"
+                        "或设置 VIDEO_PLAYWRIGHT_CHROMIUM 指向 chrome.exe。"
+                    ) from launch_error
+                browser = await p.chromium.launch(headless=True, executable_path=executable)
             try:
                 ctx = await browser.new_context(
                     user_agent=_UA,
@@ -1380,6 +1407,22 @@ async def get_video_handoff(job_id: str, format: str = 'ai', max_chars: int = 80
     if not re.fullmatch(r'[a-f0-9]{32}',job_id) or format not in {'ai','plain','timestamps','summary'} or not 2000<=max_chars<=20000:
         raise ValueError('无效的任务 ID 或复制选项')
     return await asyncio.to_thread(request,f'/api/jobs/{job_id}/handoff?format={format}&max_chars={max_chars}')
+
+
+@mcp.tool()
+async def rewrite_video_script(job_id: str, product: str = '', audience: str = '', core_point: str = '',
+                               duration: str = '', requirements: str = '') -> dict:
+    """根据已完成视频的逐字稿生成原创口播稿，返回持久任务结果。
+
+    必须先用 get_video_job 确认 status=done。仅在用户明确要求 AI 改写时调用；
+    文字稿与填写的需求会发送到用户配置的 AI 服务。返回 rewrite_status，完成后读取 rewrite_script。
+    product/audience/core_point/duration/requirements 都可留空，但不要虚构用户未提供的产品事实。
+    """
+    from inbox_bridge import request
+    if not re.fullmatch(r'[a-f0-9]{32}', job_id):
+        raise ValueError('无效的任务 ID')
+    body={'product':product,'audience':audience,'core_point':core_point,'duration':duration,'requirements':requirements}
+    return await asyncio.to_thread(request, f'/api/jobs/{job_id}/rewrite', body)
 
 
 @mcp.tool()

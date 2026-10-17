@@ -150,3 +150,23 @@ class StorageMixin:
             self.db.execute('UPDATE maintenance SET payload=? WHERE id=?',(json.dumps(audit,ensure_ascii=False),token))
             self.db.commit()
             return audit
+
+    def delete_job(self, jid):
+        """Permanently remove one completed app-owned job and its cache only."""
+        with self.lock:
+            if jid not in self.jobs:
+                raise KeyError(jid)
+            if self.busy(jid):
+                raise ValueError('任务仍在处理或生成 AI 内容，暂时不能删除')
+            directory = self.job_dir(jid)
+            if directory.exists():
+                if directory.is_symlink() or directory.resolve().parent != self.root:
+                    raise ValueError('任务目录不安全，已拒绝删除')
+                shutil.rmtree(directory)
+            # Local-source files are never inside the app-owned job directory.
+            self.db.execute('DELETE FROM jobs WHERE id=?', (jid,))
+            self.db.commit()
+            self.jobs.pop(jid, None)
+            self.cancel_events.pop(jid, None)
+            self.last_saved.pop(jid, None)
+            return {'id': jid, 'deleted': True}

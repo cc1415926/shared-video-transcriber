@@ -20,7 +20,7 @@ from storage import StorageMixin
 from handoff import build_handoff, make_storyboard
 from audio_utils import prepare_audio
 import shutil
-from local_media import inspect_media, original_path
+from local_media import inspect_media, original_path, save_video_copy
 
 TERMINAL = {'done', 'error', 'cancelled', 'interrupted'}
 PROFILES = {'fast': 'base', 'balanced': 'small', 'accurate': 'medium'}
@@ -134,7 +134,7 @@ class Library(StorageMixin):
     def list(self):
         with self.lock:
             ordered = sorted(self.jobs.values(), key=lambda item: item['created'], reverse=True)[:200]
-            return [{key: job.get(key) for key in ('id', 'title', 'platform', 'status', 'stage', 'created', 'mode', 'duration','profile','model','source_job','revision')} for job in ordered]
+            return [{key: job.get(key) for key in ('id', 'title', 'platform', 'status', 'stage', 'created', 'mode', 'duration','profile','model','source_job','revision','rewrite_status')} for job in ordered]
 
     def submit_local(self, path, profile='balanced', mode='visual', language=None, hotwords='', force=False,
                      cleanup_after=False, reference_url='', context_notes=''):
@@ -174,7 +174,8 @@ class Library(StorageMixin):
                        title=title, profile=profile, mode=mode, language=language,
                        hotwords=hotwords, status='queued', stage='排队中', progress=None,
                        created=now, updated=now, stage_started=now, transcript='', segments=[],
-                       frames=[], assets=[], warnings=[], summary=None, summary_status='idle',
+                       frames=[], assets=[], warnings=[], summary=None, summary_status='idle', spoken_script='',
+                       rewrite_script='', rewrite_status='idle', rewrite_error=None, rewrite_request={},
                        cleanup_after=cleanup_after, source_job=source_job, revision=0,
                        local_source=_local_source,context_notes=context_notes)
             self.jobs[jid] = job
@@ -271,7 +272,7 @@ class Library(StorageMixin):
                 try:
                     frames = sample_frames(str(original_media_path), directory, check, lambda p: self.update(jid, progress=p))
                     self.update(jid, frames=frames, assets=self.get(jid)['assets'] + [f['file'] for f in frames],
-                                warnings=self.get(jid)['warnings'] + ['画面为时间均匀抽样，最多 24 张，可能遗漏短暂字幕、动作或转场；不是完整视觉理解。'])
+                                warnings=self.get(jid)['warnings'] + ['视频会保留少量时间抽样图，最多 24 张，可能遗漏短暂字幕、动作或转场；不是完整视觉理解。'])
                 except Exception as exc:
                     self.update(jid, warnings=self.get(jid)['warnings'] + [f'截图提取失败，原视频和文字稿仍可用：{type(exc).__name__}'])
             check()
@@ -306,6 +307,10 @@ class Library(StorageMixin):
         md = f"# {job['title']}\n\n来源：{job['url']}\n\n"
         if job.get('local_source'):
             md += '本地来源：' + job['local_source']['name'] + '（原文件只读引用，不包含在导出包中）\n\n'
+        if job.get('spoken_script'):
+            md += '## 人工口播稿（纯文本）\n\n' + job['spoken_script'] + '\n\n'
+        if job.get('rewrite_script'):
+            md += '## AI 原创口播改写稿\n\n' + job['rewrite_script'] + '\n\n'
         if job.get('summary'):
             md += '## AI 摘要' + ('（文字修订后已过期）' if job.get('summary_stale') else '') + '\n\n' + job['summary'] + '\n\n'
         md += '## 文字稿（自动识别，可能有误）\n\n' + '\n\n'.join(f"[{stamp(s['start'])}] {s['text']}" for s in segments)
@@ -313,7 +318,9 @@ class Library(StorageMixin):
             md += '\n\n## 画面索引（抽样）\n\n' + '\n\n'.join(f"[{stamp(f['time'])}] ![画面]({f['file']})" for f in job['frames'])
         exports = {'transcript.txt': job['transcript'], 'transcript.srt': srt, 'notes.md': md,
                    'ai-context.txt':build_handoff(dict(job,status='done' if job['status']=='running' else job['status']))['text'],
-                   'result.json': json.dumps({k: job.get(k) for k in ('id', 'url', 'title', 'author', 'duration', 'language', 'model', 'transcript', 'segments', 'frames', 'warnings', 'summary','summary_stale','revision','review_count','recognition_version','source_job','media_cleaned')}, ensure_ascii=False, indent=2)}
+                   'spoken-script.txt': job.get('spoken_script') or job['transcript'],
+                   'rewrite-script.txt': job.get('rewrite_script',''),
+                   'result.json': json.dumps({k: job.get(k) for k in ('id', 'url', 'title', 'author', 'duration', 'language', 'model', 'transcript', 'spoken_script', 'rewrite_script', 'rewrite_request', 'segments', 'frames', 'warnings', 'summary','summary_stale','revision','review_count','recognition_version','source_job','media_cleaned')}, ensure_ascii=False, indent=2)}
         if job.get('context_notes'):
             exports['reference-notes.txt']='用户提供的参考摘要（不是逐字稿，未经录音核验）：\n\n'+job['context_notes']
         for name, content in exports.items():
@@ -376,6 +383,30 @@ class Library(StorageMixin):
             self._exports(jid,directory)
             return self.get(jid)
 
+    def save_spoken_script(self, jid, text):
+        """Save a separately editable, timestamp-free script without altering ASR evidence."""
+        clean = text.strip()
+        if not clean:
+            raise ValueError('口播稿不能为空')
+        if len(clean) > 50000:
+            raise ValueError('口播稿过长，请控制在 50,000 字符以内')
+        with self.lock:
+            job = self.get(jid)
+            if job['status'] != 'done':
+                raise ValueError('请等待转录完成后再编辑口播稿')
+            self.update(jid, spoken_script=clean)
+            self._exports(jid, self.job_dir(jid))
+            return self.get(jid)
+
+    def save_rewrite(self, jid, text):
+        clean=text.strip()
+        if not clean: raise ValueError('改写稿不能为空')
+        with self.lock:
+            job=self.get(jid)
+            if job['status']!='done': raise ValueError('请等待任务完成')
+            self.update(jid,rewrite_script=clean,rewrite_status='done',rewrite_error=None)
+            self._exports(jid,self.job_dir(jid));return self.get(jid)
+
     def asset(self, jid, name):
         job = self.get(jid)
         if name not in job['assets'] or Path(name).name != name:
@@ -384,6 +415,16 @@ class Library(StorageMixin):
         if path.parent != self.root / jid or not path.is_file():
             raise KeyError(name)
         return path
+
+    def save_video(self, jid):
+        with self.lock:
+            job = self.get(jid)
+            if job['status'] != 'done' or not job.get('video_file'):
+                raise ValueError('此任务没有可保存的视频，请选择“文字 + 视频”重新处理')
+            source = self.job_dir(jid) / job['video_file']
+            if source.is_symlink() or source.resolve().parent != self.job_dir(jid):
+                raise ValueError('视频缓存不安全，已拒绝保存')
+            return save_video_copy(source, job['video_file'])
 
     def summarize(self, jid, vision=False):
         from summaries import configuration
@@ -409,6 +450,28 @@ class Library(StorageMixin):
         except Exception as exc:
             # Do not expose provider responses or credentials to browser/exports.
             self.update(jid, summary_status='error', summary_error=f'AI 请求失败（{type(exc).__name__}），请检查服务地址、模型和 API key；文字稿不受影响。')
+
+    def rewrite(self, jid, request):
+        from summaries import configuration
+        configuration()
+        with self.lock:
+            job=self.get(jid)
+            if job['status'] != 'done' or not job['transcript']:
+                raise ValueError('请先完成口播文字识别')
+            if job.get('rewrite_status') == 'running':
+                return job
+            self.update(jid,rewrite_status='running',rewrite_error=None,rewrite_request=request)
+            self.ai_pool.submit(self._rewrite,jid,request)
+            return self.get(jid)
+
+    def _rewrite(self,jid,request):
+        from summaries import generate_rewrite
+        try:
+            result=generate_rewrite(self.get(jid),request)
+            self.update(jid,rewrite_script=result,rewrite_status='done',rewrite_error=None)
+            self._exports(jid,self.root/jid)
+        except Exception as exc:
+            self.update(jid,rewrite_status='error',rewrite_error=f'AI 改写失败（{type(exc).__name__}），请检查服务设置；原始文字未改动。')
 
     def close(self):
         for event in list(self.cancel_events.values()):

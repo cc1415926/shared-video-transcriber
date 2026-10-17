@@ -115,6 +115,10 @@ class EditInput(BaseModel):
     changes: list[SegmentChange] = Field(min_length=1,max_length=200)
 
 
+class SpokenScriptInput(BaseModel):
+    text: str = Field(min_length=1, max_length=50000)
+
+
 class CleanupInput(BaseModel):
     ids: list[str] = Field(min_length=1,max_length=200)
     scope: Literal['intermediates','media','all_media'] = 'media'
@@ -126,6 +130,14 @@ class CleanupCommit(BaseModel):
 
 class SummaryInput(BaseModel):
     vision: bool = False
+
+
+class RewriteInput(BaseModel):
+    product: str = Field(default='', max_length=1000)
+    audience: str = Field(default='', max_length=1000)
+    core_point: str = Field(default='', max_length=2000)
+    duration: str = Field(default='', max_length=100)
+    requirements: str = Field(default='', max_length=4000)
 
 
 @app.exception_handler(KeyError)
@@ -140,10 +152,12 @@ async def invalid(request, exc):
 
 @app.get('/api/health')
 def health(request: Request):
-    configured = bool(os.environ.get('VIDEO_AI_BASE_URL') and os.environ.get('VIDEO_AI_MODEL'))
+    base=os.environ.get('VIDEO_AI_BASE_URL','')
+    parsed=urlparse(base)
+    configured = bool(base and os.environ.get('VIDEO_AI_MODEL') and (os.environ.get('VIDEO_AI_API_KEY') or parsed.hostname in {'localhost','127.0.0.1','::1'}))
     return {'status': 'ok', 'service': 'video-inbox', 'version': __version__, 'token': request.app.state.token,
             'ffmpeg': bool(shutil.which('ffmpeg')), 'ai_configured': configured,
-            'ai_host': urlparse(os.environ.get('VIDEO_AI_BASE_URL', '')).hostname if configured else None,
+            'ai_host': parsed.hostname if configured else None,
             'device': os.environ.get('VIDEO_WHISPER_DEVICE', 'cpu'),
             'data_dir': str(request.app.state.library.root)}
 
@@ -199,6 +213,16 @@ def summarize(jid: str, body: SummaryInput, request: Request):
     return request.app.state.library.summarize(jid, body.vision)
 
 
+@app.post('/api/jobs/{jid}/rewrite', status_code=202)
+def rewrite(jid: str, body: RewriteInput, request: Request):
+    return request.app.state.library.rewrite(jid, body.model_dump())
+
+
+@app.post('/api/jobs/{jid}/rewrite-script')
+def save_rewrite(jid: str, body: SpokenScriptInput, request: Request):
+    return request.app.state.library.save_rewrite(jid, body.text)
+
+
 @app.get('/api/jobs/{jid}/assets/{name}')
 def asset(jid: str, name: str, request: Request):
     path = request.app.state.library.asset(jid, name)
@@ -214,6 +238,11 @@ def source_audio(jid: str, request: Request):
     if not path:
         raise HTTPException(404,'原音视频已清理，请重新下载后复听')
     return FileResponse(path)
+
+
+@app.post('/api/jobs/{jid}/save-video')
+def save_video(jid: str, request: Request):
+    return request.app.state.library.save_video(jid)
 
 
 @app.get('/api/jobs/{jid}/handoff')
@@ -236,6 +265,16 @@ def rerecognize(jid: str, body: RerecognizeInput, request: Request):
 @app.post('/api/jobs/{jid}/edit')
 def edit(jid: str, body: EditInput, request: Request):
     return request.app.state.library.edit_segments(jid,body.revision,[s.model_dump() for s in body.changes])
+
+
+@app.post('/api/jobs/{jid}/delete')
+def delete_job(jid: str, request: Request):
+    return request.app.state.library.delete_job(jid)
+
+
+@app.post('/api/jobs/{jid}/spoken-script')
+def save_spoken_script(jid: str, body: SpokenScriptInput, request: Request):
+    return request.app.state.library.save_spoken_script(jid, body.text)
 
 
 @app.get('/api/storage')

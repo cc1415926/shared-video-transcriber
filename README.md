@@ -30,7 +30,7 @@ Windows 双击 **run_web.bat**。首次会创建虚拟环境、安装依赖和 C
 | 方式 | 得到什么 | 取舍 |
 |---|---|---|
 | 只读文字 | 速览原话、时间戳文字稿、SRT 字幕 | 优先下载音频，适合日常浏览 |
-| 文字 + 画面 | 上述内容、原视频、最多 24 张带时间位置的抽样截图 | 下载更多数据；截图可点击回看 |
+| 文字 + 视频 | 上述内容、原视频、最多 24 张带时间位置的抽样截图 | 下载更多数据；视频可回看；点击“保存视频”再选择正式保存位置 |
 | 只下载视频 | 当前可访问画质的原视频 | 不运行语音识别 |
 
 默认“细致”使用 small，“快速”使用 base，“精细”使用 medium。较大的模型通常更准确，但不保证每段都更好；CPU 上会更慢。
@@ -45,11 +45,11 @@ B 站视频依次显示下载画面、下载声音、合并。转录按已识别
 关闭服务会中断任务；下次启动会把未完成记录标成“已中断”，可点击重新处理。
 
 “导出笔记”下载 ZIP，包含 TXT、SRT、Markdown、结构化 JSON，以及视觉任务的截图。
-完整视频单独下载。ZIP 解压后 Markdown 可相对引用截图。
+原视频仅临时缓存用于预览和转录；点击“保存视频”后才会弹出系统路径选择窗口。ZIP 解压后 Markdown 可相对引用截图。
 
 ## 纠错、复制与清理（2.1）
 
-文字稿会标出建议复核的片段，可筛选后点“核对 / 修正”，定位原音并修改。
+文字稿会标出建议复核的片段，可筛选后点“核对 / 修正”进行原地编辑；`×` 取消、`✓` 保存，输入框支持 Ctrl+Z 撤销。
 这是模型低把握、重复或静音信号的提示，不是准确率；未标记的片段也可能出错。
 修订保留时间戳、首次原稿和每次修订前的完整记录；旧摘要会标记过期。
 “重新精细识别”复用本地音频，新旧稿分别保留。专业词提示用于辅助识别，不做全局强制替换。
@@ -101,7 +101,7 @@ Windows 安装 ffmpeg：
 之后重新打开终端，让 PATH 生效。启动器直接使用虚拟环境 Python，不需要激活环境。
 macOS/Linux 可使用对应的 .venv/bin/python 手动启动。
 
-## AI 摘要与看图
+## 爆款结构分析与 AI 原创改写
 
 默认不调用付费 AI，不上传文字和画面。无 AI 配置时“速览”是按时间摘取的原话，界面明确标注，不冒充语义摘要。
 
@@ -116,7 +116,9 @@ macOS/Linux 可使用对应的 .venv/bin/python 手动启动。
 也可以复制项目里的 .env.example 为 .env，取消需要的配置项前的注释并填写，随后重启。
 已有进程环境变量优先于 .env；配置不进行变量展开。勿把 .env、密钥、视频或会议文字发到 GitHub。
 
-完成任务后点击“生成 AI 摘要”，界面会显示目标服务并确认发送。
+完成任务后点击“生成爆款结构分析”，会输出开头钩子、痛点、核心观点、推进结构、利益点、结尾引导和可借鉴结构；不编造平台数据。
+“AI 改写”Tab 可填写产品/行业、目标客户、核心观点、时长和额外要求，生成稿可继续人工编辑、保存、复制和下载。原始逐字稿、人工口播稿与 AI 改写稿彼此独立。
+界面会显示目标服务并确认发送。
 逐字稿最多发送前 45,000 字符，截断时结果会注明；如附参考摘要，会另行发送最多 8,000 字符并区分来源。勾选发送画面时，最多发送 8 张抽样图，需要支持图片输入的模型。
 AI 输出包括一句话内容、带时间位置的要点、建议回看的位置和适当的回复草稿。
 原始文字稿保持独立，AI 失败不会丢失转录。
@@ -134,6 +136,7 @@ AI 输出包括一句话内容、带时间位置的要点、建议回看的位�
 | cancel_video_job(job_id) | 请求取消 |
 | inspect_local_video(path, mode, profile, language, hotwords, reference_url, context_notes) | 只读分析用户选定的本地视频或音频 |
 | get_video_handoff(job_id, format, max_chars) | 完整文字资料与不丢内容的有序分段 |
+| rewrite_video_script(job_id, product, audience, core_point, duration, requirements) | 明确授权后生成原创口播稿 |
 
 mode 为 transcript / visual / download；profile 为 fast / balanced / accurate。
 先创建，再每隔约 2 秒查询，直到 status 为 done / error / cancelled / interrupted。
@@ -154,7 +157,7 @@ MCP 客户端配置中的 command 应指向项目虚拟环境 Python，args 指�
 旧版 analyze_video、video_to_text、get_transcript_result、download_video、transcribe_video 和抖音兼容名保留，可独立运行；旧工具仍使用其原有内存任务，推荐迁移到新工具。
 
 HTTP API 文档随应用离线提供：[/docs](http://127.0.0.1:7860/docs)，机器可读 schema 在 /openapi.json。
-GET /api/health 获取 token，写请求需带 X-Video-Token。支持创建、查询、取消、导出和显式请求摘要。
+GET /api/health 获取 token，写请求需带 X-Video-Token。支持创建、查询、取消、导出、爆款结构分析和显式 AI 改写。
 
 可分发技能在 [skills/read-shared-video/SKILL.md](skills/read-shared-video/SKILL.md)。
 把 read-shared-video 文件夹复制到所用 AI 客户端的技能目录，再配置 MCP 或使用 HTTP API。

@@ -6,16 +6,18 @@
   <meta name="color-scheme" content="light">
   <title>视频收件箱 · 把视频变成可以读的内容</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/static/style.css?v=2.2.1">
-  <script src="/static/app.js?v=2.2.1" defer></script>
-  <script src="/static/features.js?v=2.2.1" defer></script>
-  <script src="/static/local.js?v=2.2.1" defer></script>
+  <link rel="stylesheet" href="/static/style.css?v=2.2.8">
+  <script src="/static/app.js?v=2.2.8" defer></script>
+  <script src="/static/features.js?v=2.2.8" defer></script>
+  <script src="/static/local.js?v=2.2.8" defer></script>
   <script src="/static/diagnostics.js?v=2.3.0" defer></script>
 </head>
 <body>
 <aside class="sidebar">
   <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">▸</span><span>视频收件箱<small>朋友的分享，读一下就懂。</small></span></a>
+  <nav class="primary-nav" aria-label="主导航"><button class="nav-item active" data-page="home">⌂ 首页</button><button class="nav-item" data-page="workspace">＋ 新建采集</button></nav>
   <button id="new-task" class="new-task">＋ 添加视频</button>
+  <div class="category-nav" aria-label="任务分类"><button id="category-toggle" class="category-toggle" type="button" aria-expanded="true">任务分类 <span aria-hidden="true">⌃</span></button><div id="category-items"><button class="category active" data-filter="all">全部任务 <b id="count-all">0</b></button><button class="category" data-filter="running">处理中 <b id="count-running">0</b></button><button class="category" data-filter="done">已完成 <b id="count-done">0</b></button><button class="category" data-filter="visual">含视频 <b id="count-visual">0</b></button><button class="category" data-filter="rewrite">AI 改写 <b id="count-rewrite">0</b></button><button class="category" data-filter="failed">失败 / 中断 <b id="count-failed">0</b></button></div></div>
   <div class="history-title"><span>最近处理</span><span id="history-count">0</span></div>
   <label class="sr-only" for="history-search">搜索历史记录</label>
   <input id="history-search" type="search" placeholder="搜索标题或平台">
@@ -24,6 +26,7 @@
 </aside>
 <main>
   <header class="topbar"><span>把视频变成可以读的内容</span><div><button id="storage-button" class="text-button">存储与清理</button> <a href="/docs" target="_blank" rel="noopener">API 文档 ↗</a></div></header>
+  <section id="home" class="home-page"><div class="home-hero"><div><p class="eyebrow">VIDEO CONTENT EXTRACTOR</p><h1>把灵感视频，整理成<br>下一条可拍的内容。</h1><p>采集链接、校对口播、分析结构、生成原创改写稿——都留在同一个本地工作台。</p><button id="home-create" class="primary">开始采集视频 <span>↗</span></button></div><div class="hero-steps"><span>01 采集</span><span>02 校对</span><span>03 改写</span></div></div><div class="home-stats"><div><b id="stat-total">0</b><span>全部任务</span></div><div><b id="stat-done">0</b><span>已完成</span></div><div><b id="stat-rewrite">0</b><span>已有 AI 改写</span></div></div></section>
   <section class="composer" aria-labelledby="composer-title">
     <div class="composer-heading"><div><h1 id="composer-title">链接发来了。先看看讲了什么。</h1><p>粘贴抖音、Bilibili 链接，或直接粘贴整段分享文字。</p></div><span class="platforms">抖音 / Bilibili</span></div>
     <form id="job-form">
@@ -45,7 +48,7 @@
       <div class="controls">
         <fieldset class="mode-switch"><legend class="sr-only">处理方式</legend>
           <label><input type="radio" name="mode" value="transcript" checked><span>只读文字</span></label>
-          <label><input type="radio" name="mode" value="visual"><span>文字 + 画面</span></label>
+          <label><input type="radio" name="mode" value="visual"><span>文字 + 视频</span></label>
           <label><input type="radio" name="mode" value="download"><span>只下载视频</span></label>
         </fieldset>
         <label class="profile-label">识别 <select id="profile"><option value="balanced">细致 · 推荐</option><option value="fast">快速 · 较多错字</option><option value="accurate">精细 · 耗时更长</option></select></label>
@@ -58,8 +61,8 @@
   </section>
   <section id="empty" class="empty-state">
     <div class="reading-illustration" aria-hidden="true"><div class="film"><span>▸</span><i></i><i></i><i></i></div><div class="paper"><span>读视频</span><i></i><i></i><i></i><b>00:24</b></div></div>
-    <h2>不必看完，也能跟上话题。</h2><p>视频里的话，变成带时间戳的文字。<br>有教程、图表或风景？选「文字 + 画面」一起留下。</p>
-    <div class="empty-features"><span>自动保存历史</span><span>导出文字与字幕</span><span>AI 可以直接调用</span></div>
+  <h2>不必看完，也能跟上话题。</h2><p>视频里的话，变成带时间戳的文字。<br>需要回看内容？选「文字 + 视频」。</p>
+  <div class="empty-features"><span>自动保存历史</span><span>导出文字与字幕</span><span>AI 可以直接调用</span></div>
   </section>
   <article id="result" hidden>
     <div class="result-heading"><div><p id="result-meta" class="muted"></p><h2 id="result-title"></h2></div><a id="source-link" target="_blank" rel="noopener noreferrer">打开原视频 ↗</a></div>
@@ -74,27 +77,29 @@
     <div class="reader-toolbar"><div class="tabs" role="tablist" aria-label="阅读视图">
       <button id="tab-overview" role="tab" aria-controls="overview" aria-selected="true" data-tab="overview">速览</button>
       <button id="tab-transcript" role="tab" aria-controls="transcript" aria-selected="false" data-tab="transcript">文字稿 <span id="segment-count"></span></button>
-      <button id="tab-visual" role="tab" aria-controls="visual" aria-selected="false" data-tab="visual">画面 <span id="frame-count"></span></button>
-    </div><div class="exports"><button id="copy" class="secondary">复制给 AI</button><button id="copy-options" class="text-button">更多复制</button><a id="export" class="button-link" hidden>导出笔记 ↓</a><a id="download-video" hidden>下载视频 ↓</a></div></div>
-    <div class="quality-toolbar"><span id="review-status"></span><div><button id="recognize-again" class="text-button">重新精细识别</button><button id="clean-job" class="text-button">清理此视频</button></div></div>
+      <button id="tab-visual" role="tab" aria-controls="visual" aria-selected="false" data-tab="visual">视频 <span id="frame-count"></span></button>
+      <button id="tab-rewrite" role="tab" aria-controls="rewrite" aria-selected="false" data-tab="rewrite">AI 改写</button>
+    </div><div class="exports"><button id="copy" class="secondary">复制给 AI</button><button id="copy-options" class="text-button">更多复制</button><a id="export" class="button-link" hidden>导出笔记 ↓</a><button id="save-video" class="secondary" hidden>保存视频</button></div></div>
+    <div class="quality-toolbar"><span id="review-status"></span><div><button id="recognize-again" class="text-button">重新精细识别</button><button id="clean-job" class="text-button">清理此视频</button><button id="delete-job" class="text-button danger-text">删除此条记录</button></div></div>
     <section id="overview" role="tabpanel" aria-labelledby="tab-overview" class="reader">
-      <div class="overview-heading"><div><h3 id="overview-title">先读这几处</h3><p id="overview-subtitle">从不同时间位置摘取原话，帮助你判断要不要细看。</p></div><button id="summarize" class="secondary">生成 AI 摘要</button></div>
-      <div id="summary-progress" class="muted" role="status" hidden>AI 正在整理内容…</div>
+      <div class="overview-heading"><div><h3 id="overview-title">先读这几处</h3><p id="overview-subtitle">从不同时间位置摘取原话，帮助你判断要不要细看。</p></div><button id="summarize" class="secondary">生成爆款结构分析</button></div>
+      <div id="summary-progress" class="muted" role="status" hidden>AI 正在分析文案结构…</div>
       <div id="summary-error" class="error" hidden></div>
       <div id="summary-text" class="summary-text" hidden></div>
       <div id="snippets"></div>
       <p class="reader-note">自动转录可能听错人名和专业术语；重要信息请结合原视频核对。</p>
     </section>
     <section id="transcript" role="tabpanel" aria-labelledby="tab-transcript" class="reader" hidden>
-      <div class="transcript-tools"><label for="transcript-search" class="sr-only">搜索文字稿</label><input id="transcript-search" type="search" placeholder="在文字稿中查找"><label class="check"><input id="review-only" type="checkbox">只看需复核</label><a id="srt-link" hidden>下载 SRT 字幕</a></div>
+      <div class="transcript-tools"><label for="transcript-search" class="sr-only">搜索文字稿</label><input id="transcript-search" type="search" placeholder="在文字稿中查找"><label class="check"><input id="review-only" type="checkbox">只看需复核</label><button id="edit-spoken-script" class="secondary">编辑纯文本口播稿</button><button id="copy-spoken-script" class="secondary">复制纯文本</button><a id="spoken-script-link" hidden>下载纯文本</a><a id="srt-link" hidden>下载 SRT 字幕</a></div>
       <audio id="audio-player" controls preload="none" hidden></audio>
       <div id="segments"></div><p id="transcript-empty" class="reader-note">识别出第一段语音后，会逐段显示在这里。</p>
     </section>
     <section id="visual" role="tabpanel" aria-labelledby="tab-visual" class="reader" hidden>
       <video id="player" controls preload="metadata" hidden></video>
-      <p id="visual-note" class="reader-note">此任务只提取声音。选择「文字 + 画面」重新处理，就能查看截图和回看视频。</p>
+      <p id="visual-note" class="reader-note">此任务只提取声音。选择「文字 + 视频」重新处理，就能查看视频和回看内容。</p>
       <div id="frames" class="frames"></div>
     </section>
+<section id="rewrite" role="tabpanel" aria-labelledby="tab-rewrite" class="reader" hidden><div class="rewrite-grid"><label>产品或行业<input id="rewrite-product" maxlength="1000" placeholder="例如：厨房收纳用品"></label><label>目标客户<input id="rewrite-audience" maxlength="1000" placeholder="例如：小户型家庭"></label><label>核心观点<input id="rewrite-point" maxlength="2000" placeholder="例如：用分装减少浪费"></label><label>希望时长<input id="rewrite-duration" maxlength="100" placeholder="例如：60 秒"></label></div><label class="rewrite-requirements">额外改写要求<textarea id="rewrite-requirements" rows="4" maxlength="4000" placeholder="语气、禁用词、必须提及的信息等（可留空）"></textarea></label><div class="copy-actions"><button id="generate-rewrite" class="primary">生成原创口播稿</button><button id="save-rewrite" class="secondary">保存改写稿</button><button id="copy-rewrite" class="secondary">复制改写稿</button><a id="rewrite-download" hidden>下载改写稿</a></div><p id="rewrite-status" class="muted"></p><textarea id="rewrite-script" rows="14" maxlength="50000" placeholder="生成后的原创口播稿会显示在这里，可继续人工修改"></textarea></section>
   </article>
   <footer class="main-footer">视频资料默认留在这台电脑。只有点击 AI 摘要并确认后，才会发送到你配置的服务。</footer>
 </main>
@@ -110,7 +115,8 @@ VIDEO_AI_API_KEY=你的密钥</pre><p>也可复制项目的 .env.example 为 .en
   <p id="copy-page" class="muted"></p><button id="copy-picture" class="secondary">复制画面拼图</button><a id="picture-download" hidden>下载拼图</a>
   <p class="reader-note">文字和图片要分别粘贴。长内容可逐段复制，最后一段会提示 AI 开始分析；没有悄悄删减正文。浏览器禁止复制时，可以直接选中上面的文字。</p>
 </dialog>
-<dialog id="edit-dialog" class="wide-dialog"><div class="dialog-heading"><h2>核对这句话</h2><button class="close-dialog" aria-label="关闭">×</button></div><p id="edit-info" class="muted"></p><audio id="edit-audio" controls preload="none"></audio><label for="edit-text">修正文字（保留时间位置）</label><textarea id="edit-text" rows="5" maxlength="4000"></textarea><p class="muted">保留作者自造梗、口语和观点。原始识别稿与每次修订都会保留；修改后旧 AI 摘要会标记为待更新。</p><button id="save-edit" class="primary">保存修正</button><p id="edit-error" class="error" hidden></p></dialog>
+<dialog id="spoken-script-dialog" class="wide-dialog"><div class="dialog-heading"><h2>人工口播稿</h2><button class="close-dialog" aria-label="关闭">×</button></div><p class="muted">这是独立的纯文本稿，不带时间戳。修改和保存不会覆盖原始逐字稿或字幕。</p><label for="spoken-script-text">口播稿</label><textarea id="spoken-script-text" rows="16" maxlength="50000" placeholder="在这里改写为可直接粘贴到剪映或文生音频工具的口播稿"></textarea><div class="copy-actions"><button id="save-spoken-script" class="primary">保存口播稿</button><button id="copy-spoken-script-dialog" class="secondary">复制纯文本</button></div><p id="spoken-script-error" class="error" hidden></p></dialog>
+<dialog id="delete-job-dialog"><div class="dialog-heading"><h2>删除这条生成记录？</h2><button class="close-dialog" aria-label="关闭">×</button></div><p>将永久删除本工具保存的逐字稿、人工口播稿、字幕、导出文件和缓存媒体，无法在应用内恢复。</p><p>如果这是“电脑里的视频”，你的原始视频文件不会被删除。</p><button id="confirm-delete-job" class="danger">永久删除</button></dialog>
 <dialog id="recognize-dialog"><div class="dialog-heading"><h2>再听一遍</h2><button class="close-dialog" aria-label="关闭">×</button></div><p class="muted">优先复用已下载的音频。新建一份识别结果，旧稿仍留在历史中，方便对照。</p><div class="advanced"><label>识别档位<select id="redo-profile"><option value="balanced">细致 small</option><option value="accurate">精细 medium（更慢）</option><option value="fast">快速 base</option></select></label><label>语言<select id="redo-language"><option value="">自动</option><option value="zh">中文</option><option value="en">英语</option><option value="ja">日语</option><option value="ko">韩语</option></select></label><label>这段视频中的专业词 / 自造词<input id="redo-terms" maxlength="500" placeholder="例如：光粒级、当量分级、Hopf"></label></div><p id="redo-note" class="muted"></p><button id="confirm-redo" class="primary">开始重新识别</button></dialog>
 <dialog id="storage-dialog" class="wide-dialog"><div class="dialog-heading"><h2>把空间腾出来</h2><button class="close-dialog" aria-label="关闭">×</button></div><p id="storage-total"></p>
   <label>清理范围<select id="cleanup-scope"><option value="media">删除音视频，保留文字和截图</option><option value="intermediates">只删中间文件，保留复听和原视频</option><option value="all_media">删除音视频和截图，只留文字资料</option></select></label>
