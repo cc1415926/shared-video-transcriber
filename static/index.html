@@ -28,9 +28,9 @@
   <header class="topbar"><span>把视频变成可以读的内容</span><div><button id="storage-button" class="text-button">存储与清理</button> <a href="/docs" target="_blank" rel="noopener">API 文档 ↗</a></div></header>
   <section id="home" class="home-page"><div class="home-hero"><div><p class="eyebrow">VIDEO CONTENT EXTRACTOR</p><h1>把灵感视频，整理成<br>下一条可拍的内容。</h1><p>采集链接、校对口播、分析结构、生成原创改写稿——都留在同一个本地工作台。</p><button id="home-create" class="primary">开始采集视频 <span>↗</span></button></div><div class="hero-steps"><span>01 采集</span><span>02 校对</span><span>03 改写</span></div></div><div class="home-stats"><div><b id="stat-total">0</b><span>全部任务</span></div><div><b id="stat-done">0</b><span>已完成</span></div><div><b id="stat-rewrite">0</b><span>已有 AI 改写</span></div></div></section>
   <section class="composer" aria-labelledby="composer-title">
-    <div class="composer-heading"><div><h1 id="composer-title">链接发来了。先看看讲了什么。</h1><p>粘贴抖音、Bilibili 链接，或直接粘贴整段分享文字。</p></div><span class="platforms">抖音 / Bilibili</span></div>
+    <div class="composer-heading"><div><h1 id="composer-title">链接发来了。先看看讲了什么。</h1><p>粘贴抖音、Bilibili、YouTube 或 TikTok 链接，也可直接粘贴整段分享文字。</p></div><span class="platforms">抖音 / Bilibili / YouTube / TikTok</span></div>
     <form id="job-form">
-      <div class="source-switch" role="group" aria-label="视频来源"><button id="source-online" type="button" class="source-active" aria-pressed="true">分享链接</button><button id="source-local" type="button" aria-pressed="false">电脑里的视频</button></div>
+      <div class="source-switch" role="group" aria-label="视频来源"><button id="source-online" type="button" class="source-active" aria-pressed="true">分享链接</button><button id="source-local" type="button" aria-pressed="false">电脑里的视频</button><button id="source-channels" type="button" aria-pressed="false">微信视频号</button></div>
       <div id="online-input">
       <label for="url" class="sr-only">视频链接或分享文字</label>
       <textarea id="url" rows="2" required maxlength="8000" placeholder="把朋友发来的链接粘贴在这里…" spellcheck="false"></textarea>
@@ -45,6 +45,15 @@
           <label class="text-file-label">读取 TXT 摘要<input id="local-notes-file" type="file" accept=".txt,text/plain"></label>
         </details>
       </div>
+      <details id="channels-metadata" class="local-reference" hidden><summary>视频号元数据（可选；未填写会标记为未获取）</summary>
+        <label>作品 ID<input id="channels-work-id" maxlength="500" placeholder="下载器实际返回时再填写"></label>
+        <label>标题<input id="channels-title" maxlength="1000" placeholder="未获取可留空"></label>
+        <label>作者<input id="channels-author" maxlength="500" placeholder="未获取可留空"></label>
+        <label>原始发布文案<textarea id="channels-caption" rows="4" maxlength="8000" placeholder="与自动口播逐字稿分开保存；未获取可留空"></textarea></label>
+        <label>话题标签<input id="channels-tags" maxlength="2000" placeholder="多个标签用逗号分隔"></label>
+        <label>作品链接<input id="channels-url" maxlength="2000" placeholder="实际可获取时再填写"></label>
+      </details>
+      <p id="channels-collector-status" class="local-source-note" hidden role="status"></p>
       <div class="controls">
         <fieldset class="mode-switch"><legend class="sr-only">处理方式</legend>
           <label><input type="radio" name="mode" value="transcript" checked><span>只读文字</span></label>
@@ -69,10 +78,11 @@
     <section id="progress-panel" class="progress-panel" aria-label="任务进度">
       <div class="progress-heading"><strong id="stage">排队中</strong><span id="progress-number"></span></div>
       <progress id="progress" max="1" aria-label="当前阶段进度"></progress>
-      <div class="progress-footer"><span id="progress-detail"></span><button id="cancel" class="text-button">取消任务</button><button id="retry" class="text-button" hidden>重新处理</button></div>
+      <div class="progress-footer"><span id="progress-detail"></span><button id="cancel" class="text-button">取消任务</button><button id="retry" class="text-button" hidden>重新处理</button><button id="verify-source" class="secondary" hidden>打开原视频完成验证</button></div>
     </section>
     <div id="job-error" class="error" role="alert" hidden></div>
     <div id="warnings" class="warnings"></div>
+    <details id="channels-source-panel" class="reference-note-panel" hidden><summary>微信视频号原始元数据</summary><p id="channels-source-text"></p></details>
     <details id="reference-note-panel" class="reference-note-panel" hidden><summary>已附参考摘要（不是逐字稿，未经录音核验）</summary><p id="reference-note-text"></p></details>
     <div class="reader-toolbar"><div class="tabs" role="tablist" aria-label="阅读视图">
       <button id="tab-overview" role="tab" aria-controls="overview" aria-selected="true" data-tab="overview">速览</button>

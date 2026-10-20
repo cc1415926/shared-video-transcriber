@@ -44,6 +44,31 @@ class UrlTests(unittest.TestCase):
     def test_bare_link(self):
         self.assertEqual(server._extract_url('b23.tv/AbCd！'), 'https://b23.tv/AbCd')
 
+    def test_youtube_and_tiktok_links_are_recognized(self):
+        cases = {
+            'https://youtu.be/dQw4w9WgXcQ': 'youtube',
+            'https://www.youtube.com/watch?v=dQw4w9WgXcQ': 'youtube',
+            'https://www.tiktok.com/@creator/video/123456789': 'tiktok',
+            'https://vm.tiktok.com/ZMexample/': 'tiktok',
+        }
+        for url, platform in cases.items():
+            with self.subTest(url=url):
+                self.assertEqual(server._detect_platform(server._extract_url(url)), platform)
+
+    def test_youtube_and_tiktok_routes_use_ytdlp_adapter(self):
+        def fake_adapter(platform, url, out_dir, progress_cb=None, *, video=False):
+            path = Path(out_dir) / ('video.mp4' if video else 'audio.wav')
+            path.write_bytes(b'fixture')
+            return str(path)
+
+        with tempfile.TemporaryDirectory() as root, patch.object(server, '_download_ytdlp_platform_media_sync', fake_adapter):
+            path, platform = asyncio.run(server._download_transcription_media('https://youtu.be/dQw4w9WgXcQ', root))
+            self.assertEqual(platform, 'youtube')
+            self.assertTrue(Path(path).is_file())
+            path, platform = asyncio.run(server._download_video_file('https://vm.tiktok.com/ZMexample/', root))
+            self.assertEqual(platform, 'tiktok')
+            self.assertTrue(Path(path).is_file())
+
 
 async def fake_download(url, directory, on_progress=None):
     path = Path(directory) / 'audio.wav'
@@ -135,6 +160,22 @@ class LifecycleTests(unittest.TestCase):
 
 
 class ApiTests(unittest.TestCase):
+    def test_open_source_for_manual_douyin_verification(self):
+        with tempfile.TemporaryDirectory() as root, patch.dict('os.environ', {'VIDEO_DATA_DIR': root}), TestClient(app) as client:
+            token = client.get('/api/health').json()['token']
+            headers = {'X-Video-Token': token}
+            library = client.app.state.library
+            job = library.submit('https://v.douyin.com/example')
+            job['status'] = 'error'
+            library._save(job)
+
+            with patch('webapp.webbrowser.open', return_value=True) as open_browser:
+                response = client.post(f"/api/jobs/{job['id']}/open-source", headers=headers)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()['opened'])
+            open_browser.assert_called_once_with('https://v.douyin.com/example', new=2)
+
     def test_only_known_windows_disconnect_is_filtered(self):
         loop = unittest.mock.Mock()
         error = ConnectionResetError()

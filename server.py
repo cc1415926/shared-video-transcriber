@@ -1,8 +1,8 @@
 """
-Douyin / Bilibili Video Analysis MCP Server
+Douyin / Bilibili / YouTube / TikTok Video Analysis MCP Server
 
 工具一览：
-  - analyze_video(url)         : 一键转录（同步）。支持抖音和 Bilibili。
+  - analyze_video(url)         : 一键转录（同步）。支持抖音、Bilibili、YouTube 和 TikTok。
   - video_to_text(url)         : 异步任务，立即返回 job_id。适用于 Claude Desktop（硬超时）。
                                  后续用 get_transcript_result(job_id) 取结果。
   - get_transcript_result(...) : 轮询/等待异步任务结果。
@@ -12,7 +12,7 @@ Douyin / Bilibili Video Analysis MCP Server
 
 Architecture:
   - Playwright (headless Chromium) intercepts aweme/detail API to get signed CDN URLs
-  - yt-dlp extracts and downloads Bilibili media
+  - yt-dlp extracts and downloads Bilibili, YouTube and TikTok media
   - urllib downloads direct Douyin/Bilibili media URLs where possible
   - faster-whisper transcribes (it internally uses ffmpeg on local files, which is fine)
 """
@@ -43,7 +43,7 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("Video Analysis", log_level="ERROR")
 
 _URL_RE = re.compile(
-    r'https?://\S+|(?:www\.)?(?:v\.douyin\.com|douyin\.com|iesdouyin\.com|bilibili\.com|b23\.tv)/\S+',
+    r'https?://\S+|(?:www\.)?(?:v\.douyin\.com|douyin\.com|iesdouyin\.com|bilibili\.com|b23\.tv|youtube\.com|youtu\.be|tiktok\.com|vm\.tiktok\.com|vt\.tiktok\.com)/\S+',
     re.IGNORECASE,
 )
 _UA = (
@@ -123,16 +123,20 @@ def _detect_platform(url: str) -> str:
     parsed = urlparse(url)
     host = (parsed.hostname or '').lower()
     if parsed.scheme not in ('http', 'https') or parsed.username or parsed.password or parsed.port not in (None, 80, 443):
-        raise ValueError('请输入正常的抖音或 Bilibili 分享链接')
+        raise ValueError('请输入正常的抖音、Bilibili、YouTube 或 TikTok 分享链接')
     if host in {'douyin.com', 'www.douyin.com', 'v.douyin.com', 'iesdouyin.com', 'www.iesdouyin.com'}:
         return "douyin"
     if host in {'bilibili.com', 'www.bilibili.com', 'm.bilibili.com', 'b23.tv', 'www.b23.tv'}:
         return "bilibili"
+    if host in {'youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be'}:
+        return "youtube"
+    if host in {'tiktok.com', 'www.tiktok.com', 'm.tiktok.com', 'vm.tiktok.com', 'vt.tiktok.com'}:
+        return "tiktok"
     raise ValueError(f"暂不支持这个网站: {host or url}")
 
 
 def _platform_label(platform: str) -> str:
-    return {"douyin": "抖音", "bilibili": "Bilibili"}.get(platform, platform)
+    return {"douyin": "抖音", "bilibili": "Bilibili", "youtube": "YouTube", "tiktok": "TikTok"}.get(platform, platform)
 
 
 # ── Playwright：拦截 aweme/detail API ─────────────────────
@@ -952,6 +956,62 @@ def _download_bilibili_video_sync(url: str, out_dir: str, progress_cb=None) -> s
     raise RuntimeError("Bilibili 视频下载失败 —— " + "；".join(errors))
 
 
+def _download_ytdlp_platform_media_sync(
+    platform: str, url: str, out_dir: str, progress_cb=None, *, video: bool = False
+) -> str:
+    """Download a public YouTube or TikTok item with the already bundled yt-dlp.
+
+    No browser cookies are read or supplied here.  Private, age-gated, login- or
+    CAPTCHA-protected items therefore fail with an actionable message instead
+    of attempting to work around the platform's access controls.
+    """
+    label = _platform_label(platform)
+    YoutubeDL = _load_ytdlp()
+    before = {
+        os.path.join(out_dir, name)
+        for name in os.listdir(out_dir)
+        if os.path.isfile(os.path.join(out_dir, name))
+    }
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "noplaylist": True,
+        "format": _BILIBILI_VIDEO_FORMAT if video else "bestaudio[ext=m4a]/bestaudio/best",
+        "merge_output_format": "mp4" if video else None,
+        "outtmpl": os.path.join(out_dir, f"{platform}_%(id)s.%(ext)s"),
+        "windowsfilenames": True,
+        "socket_timeout": 30,
+        "retries": 2,
+        "progress_hooks": [lambda d: progress_cb(d.get('downloaded_bytes', 0), d.get('total_bytes') or d.get('total_bytes_estimate'))] if progress_cb else [],
+        "http_headers": {"User-Agent": _UA},
+    }
+    try:
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+        entries = info.get("entries") if isinstance(info, dict) else None
+        if entries:
+            info = next((entry for entry in entries if entry), {})
+        if not isinstance(info, dict):
+            info = {}
+        Path(out_dir, 'metadata.json').write_text(json.dumps({
+            'title': info.get('title'), 'author': info.get('uploader') or info.get('channel'),
+            'duration': info.get('duration'), 'source_url': url,
+        }, ensure_ascii=False), encoding='utf-8')
+        path = _find_downloaded_file(out_dir, before)
+        (_ensure_video_stream if video else _ensure_audio_stream)(path)
+        return path
+    except Exception as e:
+        message = str(e)
+        lower = message.lower()
+        if any(term in lower for term in ('login', 'sign in', 'captcha', 'private', 'age-restricted', 'not available')):
+            raise RuntimeError(
+                f"{label} 无法访问该视频，可能需要登录、验证、年龄确认或作品并非公开。"
+                "请在浏览器确认可播放后复制新的公开分享链接；本工具不会读取 Cookie 或绕过验证。"
+            ) from e
+        raise RuntimeError(f"{label} 下载失败: {message}") from e
+
+
 # ── 下载（urllib，无 ffmpeg 网络调用）───────────────────
 
 def _download_sync(
@@ -1043,7 +1103,7 @@ async def _download_transcription_media(
     Download the best media file for transcription and return (path, platform).
 
     on_progress: 可选回调 on_progress(downloaded_bytes, total_bytes_or_None)，
-        在下载过程中实时回报字节进度（抖音、Bilibili 直链/音频流都支持）。
+        在下载过程中实时回报字节进度；抖音、Bilibili、YouTube 与 TikTok 均支持。
     """
     platform = _detect_platform(real_url)
     loop = asyncio.get_running_loop()
@@ -1067,6 +1127,12 @@ async def _download_transcription_media(
         )
         await loop.run_in_executor(_DOWNLOAD_EXECUTOR, _ensure_audio_stream, out_path)
         return out_path, platform
+    if platform in {"youtube", "tiktok"}:
+        out_path = await loop.run_in_executor(
+            _DOWNLOAD_EXECUTOR,
+            functools.partial(_download_ytdlp_platform_media_sync, platform, real_url, out_dir, on_progress),
+        )
+        return out_path, platform
     raise ValueError(f"暂不支持这个平台: {platform}")
 
 
@@ -1076,8 +1142,7 @@ async def _download_video_file(
     """
     Download the source video and return (path, platform).
 
-    on_progress: 抖音单文件下载支持实时字节进度；Bilibili 走 DASH 分片合并，
-        进度无法简单线性回报，这里忽略该回调。
+    on_progress: 平台可用时实时回报字节进度；分片合并的总进度可能不是线性的。
     """
     platform = _detect_platform(real_url)
     loop = asyncio.get_running_loop()
@@ -1095,6 +1160,12 @@ async def _download_video_file(
     if platform == "bilibili":
         out_path = await loop.run_in_executor(
             _DOWNLOAD_EXECUTOR, _download_bilibili_video_sync, real_url, out_dir, on_progress
+        )
+        return out_path, platform
+    if platform in {"youtube", "tiktok"}:
+        out_path = await loop.run_in_executor(
+            _DOWNLOAD_EXECUTOR,
+            functools.partial(_download_ytdlp_platform_media_sync, platform, real_url, out_dir, on_progress, video=True),
         )
         return out_path, platform
     raise ValueError(f"暂不支持这个平台: {platform}")
@@ -1127,9 +1198,9 @@ async def _download_video_async(url: str) -> tuple[str, str, float]:
 @mcp.tool()
 async def analyze_douyin(url: str, model_size: str = WHISPER_MODEL) -> str:
     """
-    抖音/Bilibili 视频一键转录：下载适合转录的媒体 → Whisper 转录 → 返回文字稿。
+    抖音/Bilibili/YouTube/TikTok 视频一键转录：下载适合转录的媒体 → Whisper 转录 → 返回文字稿。
 
-    url: 抖音或 Bilibili 分享链接/分享文本（自动提取URL）。
+    url: 抖音、Bilibili、YouTube 或 TikTok 分享链接/分享文本（自动提取URL）。
          支持格式：
            - 纯URL:  https://v.douyin.com/43Hxli09K70/
            - 长URL:  https://www.douyin.com/video/7628423061288682112
@@ -1155,7 +1226,7 @@ async def analyze_douyin(url: str, model_size: str = WHISPER_MODEL) -> str:
 @mcp.tool()
 async def analyze_video(url: str, model_size: str = WHISPER_MODEL) -> str:
     """
-    通用视频转文字：支持抖音和 Bilibili 链接，返回 Whisper 文字稿。
+    通用视频转文字：支持抖音、Bilibili、YouTube 和 TikTok 链接，返回 Whisper 文字稿。
     参数同 analyze_douyin。
     """
     return await analyze_douyin(url, model_size)
@@ -1164,10 +1235,10 @@ async def analyze_video(url: str, model_size: str = WHISPER_MODEL) -> str:
 @mcp.tool()
 async def download_douyin(url: str) -> str:
     """
-    下载抖音/Bilibili 视频，返回本地文件路径。
+    下载抖音/Bilibili/YouTube/TikTok 视频，返回本地文件路径。
     文件保存在系统临时目录，不会自动清理，请手动删除。
 
-    url: 抖音或 Bilibili 分享链接/分享文本（自动提取URL）。
+    url: 抖音、Bilibili、YouTube 或 TikTok 分享链接/分享文本（自动提取URL）。
     """
     try:
         out_path, _, _ = await _download_video_async(url)
@@ -1182,7 +1253,7 @@ async def download_douyin(url: str) -> str:
 @mcp.tool()
 async def download_video(url: str) -> str:
     """
-    通用视频下载：支持抖音和 Bilibili 链接，返回本地文件路径。
+    通用视频下载：支持抖音、Bilibili、YouTube 和 TikTok 链接，返回本地文件路径。
     参数同 download_douyin。
     """
     return await download_douyin(url)
@@ -1248,14 +1319,14 @@ async def _full_pipeline_bg(job_id: str, url: str, model_size: str) -> None:
 @mcp.tool()
 async def douyin_to_text(url: str, model_size: str = WHISPER_MODEL) -> str:
     """
-    【推荐 Claude Desktop 使用】抖音/Bilibili 视频转文字（异步）。
+    【推荐 Claude Desktop 使用】抖音/Bilibili/YouTube/TikTok 视频转文字（异步）。
     立即返回 job_id（<1秒），后台执行下载+转录。
     随后请调用 get_transcript_result(job_id) 取结果（该工具会等待最多 25 秒，未完成请再次调用）。
 
     适用场景：Claude Desktop chat 等客户端 MCP 工具调用有硬超时（约 30-60 秒），
     无法承受完整流程（25-90 秒）的同步调用。
 
-    url: 抖音或 Bilibili 分享链接/分享文本（自动提取URL）。
+    url: 抖音、Bilibili、YouTube 或 TikTok 分享链接/分享文本（自动提取URL）。
          支持: https://v.douyin.com/xxx/、https://www.douyin.com/video/xxx、
                https://www.bilibili.com/video/BV... 或整段分享文本
     model_size: Whisper 模型，默认 "tiny"（快）。准度不够时改 "small"。
@@ -1279,7 +1350,7 @@ async def douyin_to_text(url: str, model_size: str = WHISPER_MODEL) -> str:
 @mcp.tool()
 async def video_to_text(url: str, model_size: str = WHISPER_MODEL) -> str:
     """
-    通用异步视频转文字：支持抖音和 Bilibili，返回 job_id。
+    通用异步视频转文字：支持抖音、Bilibili、YouTube 和 TikTok，返回 job_id。
     参数同 douyin_to_text。
     """
     return await douyin_to_text(url, model_size)
@@ -1357,7 +1428,7 @@ async def transcribe_video(file_path: str, model_size: str = WHISPER_MODEL) -> s
 
 @mcp.tool()
 async def inspect_shared_video(url: str, mode: str = 'transcript', profile: str = 'balanced') -> dict:
-    """推荐：读取朋友分享的抖音/Bilibili 视频，返回持久任务 ID。
+    """推荐：读取朋友分享的平台视频，返回持久任务 ID。
 
     需要本地视频收件箱 app.py 已启动。mode: transcript（声音文字，最快）/
     visual（文字+原视频+带时间戳的抽样图片）/ download（只下载）。

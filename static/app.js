@@ -2,11 +2,11 @@
 const $ = id => document.getElementById(id);
 const terminal = new Set(['done','error','cancelled','interrupted']);
 const requestedJob=new URLSearchParams(location.search).get('job')||'';
-const state = {token:'',health:null,jobs:[],selected:/^[a-f0-9]{32}$/.test(requestedJob)?requestedJob:localStorage.getItem('video.selected'),job:null,tab:'overview',lastRender:'',historyKey:'',page:'home',filter:'all'};
+const state = {token:'',health:null,jobs:[],selected:/^[a-f0-9]{32}$/.test(requestedJob)?requestedJob:localStorage.getItem('video.selected'),job:null,tab:'overview',lastRender:'',historyKey:'',page:'home',filter:'all',verificationOpened:new Set()};
 const fmt = sec => {const n=Math.max(0,Math.floor(sec||0));return (n>=3600?Math.floor(n/3600)+':':'')+String(Math.floor(n/60)%60).padStart(2,'0')+':'+String(n%60).padStart(2,'0');};
 const mb = n => ((n||0)/1048576).toFixed(1)+' MB';
 const labels = {done:'已完成',running:'处理中',queued:'排队中',cancelling:'正在停止',cancelled:'已取消',error:'失败',interrupted:'已中断'};
-const platformLabel = value => ({douyin:'抖音',bilibili:'Bilibili',local:'本地文件'}[value]||value);
+const platformLabel = value => ({douyin:'抖音',bilibili:'Bilibili',youtube:'YouTube',tiktok:'TikTok',local:'本地文件',wechat_channels:'微信视频号'}[value]||value);
 function node(tag,text,className){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(className)el.className=className;return el;}
 function visible(id,show){$(id).hidden=!show;}
 function showPage(page){state.page=page;visible('home',page==='home');document.querySelector('.composer').hidden=page!=='workspace';visible('result',page==='workspace'&&!!state.job);document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));if(page==='workspace')$('composer-title').scrollIntoView({block:'start',behavior:'smooth'});}
@@ -132,8 +132,18 @@ function render(){
   $('progress-detail').textContent=detail;
   visible('cancel',!terminal.has(job.status));$('cancel').disabled=job.status==='cancelling';
   visible('retry',['error','cancelled','interrupted'].includes(job.status));
+  const needsVerification=job.status==='error'&&['douyin','youtube','tiktok'].includes(job.platform)&&/登录|验证|可播放|可读取/.test(job.error||'');
+  visible('verify-source',needsVerification);$('verify-source').disabled=false;
+  if(needsVerification&&!state.verificationOpened.has(job.id)){
+    state.verificationOpened.add(job.id);
+    api('/jobs/'+job.id+'/open-source',{}).then(result=>toast(result.message)).catch(e=>toast(e.message));
+  }
   visible('job-error',!!job.error);$('job-error').textContent=job.error||'';
   $('warnings').replaceChildren(...job.warnings.map(w=>node('p',w)));
+  const metadata=job.source_metadata||{};
+  const isChannels=job.platform==='wechat_channels';
+  visible('channels-source-panel',isChannels);
+  if(isChannels)$('channels-source-text').textContent=['作品 ID：'+(metadata.work_id||'未获取'),'作者：'+(metadata.author||'未获取'),'原始发布文案：'+(metadata.original_caption||'未获取'),'话题标签：'+((metadata.hashtags||[]).join('、')||'未获取')].join('\n');
   const key=JSON.stringify([job.id,job.status,job.segments,job.frames,job.summary,job.summary_status,job.summary_error,job.rewrite_script,job.rewrite_status,job.assets,job.revision,job.media_cleaned,job.cache_cleaned,job.media_available,job.local_video_available]);
   if(key!==state.lastRender){state.lastRender=key;renderContent();}
 }
@@ -158,6 +168,12 @@ $('category-toggle').onclick=()=>{const collapsed=$('category-items').hidden;vis
 if(localStorage.getItem('video.categories-collapsed')==='true')$('category-toggle').click();
 $('cancel').onclick=async()=>{try{state.job=await api('/jobs/'+state.job.id+'/cancel',{});render();}catch(e){toast(e.message);}};
 $('retry').onclick=()=>submit({url:state.job.url,profile:state.job.profile,mode:state.job.mode,language:state.job.language||null,hotwords:state.job.hotwords||'',force:true});
+$('verify-source').onclick=async()=>{
+  const button=$('verify-source');button.disabled=true;
+  try{const result=await api('/jobs/'+state.job.id+'/open-source',{});toast(result.message);}
+  catch(e){toast(e.message);}
+  finally{button.disabled=false;}
+};
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText(state.job.transcript);toast('文字稿已复制。');}catch{toast('复制失败，请下载笔记或手动选中文字。');}};
 $('save-video').onclick=async()=>{
   const button=$('save-video');

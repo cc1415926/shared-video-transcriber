@@ -137,16 +137,18 @@ class Library(StorageMixin):
             return [{key: job.get(key) for key in ('id', 'title', 'platform', 'status', 'stage', 'created', 'mode', 'duration','profile','model','source_job','revision','rewrite_status')} for job in ordered]
 
     def submit_local(self, path, profile='balanced', mode='visual', language=None, hotwords='', force=False,
-                     cleanup_after=False, reference_url='', context_notes=''):
+                     cleanup_after=False, reference_url='', context_notes='', source_platform='local',
+                     source_metadata=None):
         source=inspect_media(path)
         if Path(source['path']).is_relative_to(self.root):
             raise ValueError('这是应用管理的缓存文件，请从历史记录重新识别；本地导入请选择缓存目录之外的原文件')
         if mode == 'download':
             raise ValueError('本地文件无需下载，请选择文字或文字加画面')
         return self.submit(reference_url,profile,mode,language,hotwords,force,cleanup_after,
-                           _local_source=source,context_notes=context_notes)
+                           _local_source=source,context_notes=context_notes,
+                           _source_platform=source_platform, _source_metadata=source_metadata or {})
 
-    def submit(self, url, profile='balanced', mode='transcript', language=None, hotwords='', force=False, cleanup_after=False, source_job=None, _local_source=None, context_notes=''):
+    def submit(self, url, profile='balanced', mode='transcript', language=None, hotwords='', force=False, cleanup_after=False, source_job=None, _local_source=None, context_notes='', _source_platform=None, _source_metadata=None):
         url = media._extract_url(url) if url or not _local_source else ''
         if profile not in PROFILES or mode not in {'transcript', 'visual', 'download'}:
             raise ValueError('未知的处理方式')
@@ -156,7 +158,8 @@ class Library(StorageMixin):
             raise ValueError('仅下载模式不能在完成后自动删除视频')
         if shutil.disk_usage(self.root).free < int(os.environ.get('VIDEO_MIN_FREE_MB','512'))*1048576:
             raise ValueError('磁盘剩余空间不足，请先清理一些媒体文件')
-        signature = hashlib.sha256(json.dumps([url, profile, mode, language, hotwords,cleanup_after,_local_source,context_notes,'2.2'], ensure_ascii=False).encode()).hexdigest()
+        source_metadata = _source_metadata or {}
+        signature = hashlib.sha256(json.dumps([url, profile, mode, language, hotwords,cleanup_after,_local_source,context_notes,_source_platform,source_metadata,'2.3'], ensure_ascii=False).encode()).hexdigest()
         with self.lock:
             if source_job and (source_job not in self.jobs or self.busy(source_job) or not self.source_path(source_job)):
                 raise ValueError('原音频已清理或正在使用，请直接粘贴链接重新处理')
@@ -168,8 +171,8 @@ class Library(StorageMixin):
                 raise ValueError('队列已满，请等部分任务完成后再添加')
             jid = uuid.uuid4().hex
             now = time.time()
-            platform='local' if _local_source else media._detect_platform(url)
-            title=Path(_local_source['name']).stem if _local_source else media._platform_label(platform) + ' · ' + urlparse(url).path.strip('/').split('/')[-1]
+            platform=(_source_platform or 'local') if _local_source else media._detect_platform(url)
+            title=(source_metadata.get('title') or Path(_local_source['name']).stem) if _local_source else media._platform_label(platform) + ' · ' + urlparse(url).path.strip('/').split('/')[-1]
             job = dict(id=jid, url=url, signature=signature, platform=platform,
                        title=title, profile=profile, mode=mode, language=language,
                        hotwords=hotwords, status='queued', stage='排队中', progress=None,
@@ -177,7 +180,7 @@ class Library(StorageMixin):
                        frames=[], assets=[], warnings=[], summary=None, summary_status='idle', spoken_script='',
                        rewrite_script='', rewrite_status='idle', rewrite_error=None, rewrite_request={},
                        cleanup_after=cleanup_after, source_job=source_job, revision=0,
-                       local_source=_local_source,context_notes=context_notes)
+                       local_source=_local_source,context_notes=context_notes,source_metadata=source_metadata)
             self.jobs[jid] = job
             self.cancel_events[jid] = threading.Event()
             self._save(job)
@@ -232,8 +235,8 @@ class Library(StorageMixin):
                 if not local_path:
                     raise ValueError('本地原文件已移动、删除或修改，请重新选择文件导入')
                 path=str(local_path)
-                platform='local'
-                fields={'title':job['title'],'duration':job['local_source']['duration']}
+                platform=job['platform']
+                fields={'title':job['title'],'duration':job['local_source']['duration'], **job.get('source_metadata',{})}
                 stage('读取本地视频（不复制原文件）')
             else:
                 downloader = media._download_transcription_media if job['mode'] == 'transcript' else media._download_video_file
@@ -307,6 +310,13 @@ class Library(StorageMixin):
         md = f"# {job['title']}\n\n来源：{job['url']}\n\n"
         if job.get('local_source'):
             md += '本地来源：' + job['local_source']['name'] + '（原文件只读引用，不包含在导出包中）\n\n'
+        if job.get('platform') == 'wechat_channels':
+            metadata = job.get('source_metadata') or {}
+            md += ('## 微信视频号原始元数据\n\n'
+                   f"作品 ID：{metadata.get('work_id') or '未获取'}\n\n"
+                   f"作者：{metadata.get('author') or '未获取'}\n\n"
+                   f"原始发布文案：{metadata.get('original_caption') or '未获取'}\n\n"
+                   f"话题标签：{'、'.join(metadata.get('hashtags') or []) or '未获取'}\n\n")
         if job.get('spoken_script'):
             md += '## 人工口播稿（纯文本）\n\n' + job['spoken_script'] + '\n\n'
         if job.get('rewrite_script'):
@@ -320,7 +330,7 @@ class Library(StorageMixin):
                    'ai-context.txt':build_handoff(dict(job,status='done' if job['status']=='running' else job['status']))['text'],
                    'spoken-script.txt': job.get('spoken_script') or job['transcript'],
                    'rewrite-script.txt': job.get('rewrite_script',''),
-                   'result.json': json.dumps({k: job.get(k) for k in ('id', 'url', 'title', 'author', 'duration', 'language', 'model', 'transcript', 'spoken_script', 'rewrite_script', 'rewrite_request', 'segments', 'frames', 'warnings', 'summary','summary_stale','revision','review_count','recognition_version','source_job','media_cleaned')}, ensure_ascii=False, indent=2)}
+                   'result.json': json.dumps({k: job.get(k) for k in ('id', 'url', 'title', 'author', 'platform', 'source_metadata', 'duration', 'language', 'model', 'transcript', 'spoken_script', 'rewrite_script', 'rewrite_request', 'segments', 'frames', 'warnings', 'summary','summary_stale','revision','review_count','recognition_version','source_job','media_cleaned')}, ensure_ascii=False, indent=2)}
         if job.get('context_notes'):
             exports['reference-notes.txt']='用户提供的参考摘要（不是逐字稿，未经录音核验）：\n\n'+job['context_notes']
         for name, content in exports.items():

@@ -4,6 +4,7 @@ import logging
 import os
 import secrets
 import shutil
+import webbrowser
 import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -105,6 +106,15 @@ class LocalJobInput(BaseModel):
     context_notes: str = Field(default='',max_length=8000)
 
 
+class WechatChannelsImportInput(LocalJobInput):
+    work_id: str = Field(default='', max_length=500)
+    title: str = Field(default='', max_length=1000)
+    author: str = Field(default='', max_length=500)
+    original_caption: str = Field(default='', max_length=8000)
+    hashtags: list[str] = Field(default_factory=list, max_length=100)
+    source_url: str = Field(default='', max_length=2000)
+
+
 class SegmentChange(BaseModel):
     index: int = Field(ge=0)
     text: str = Field(min_length=1,max_length=4000)
@@ -193,6 +203,24 @@ def create_local_job(body: LocalJobInput, request: Request):
     return request.app.state.library.submit_local(**body.model_dump())
 
 
+@app.post('/api/channels/local/jobs', status_code=202)
+def create_wechat_channels_job(body: WechatChannelsImportInput, request: Request):
+    """Import a completed, user-selected Channels download without copying it."""
+    values = body.model_dump()
+    metadata = {
+        'work_id': values.pop('work_id').strip(),
+        'title': values.pop('title').strip(),
+        'author': values.pop('author').strip(),
+        'original_caption': values.pop('original_caption').strip(),
+        'hashtags': [item.strip() for item in values.pop('hashtags') if item.strip()],
+    }
+    source_url = values.pop('source_url').strip()
+    if source_url:
+        values['reference_url'] = source_url
+    return request.app.state.library.submit_local(**values, source_platform='wechat_channels',
+                                                   source_metadata=metadata)
+
+
 @app.get('/api/jobs/{jid}/original')
 def original_video(jid: str, request: Request):
     library=request.app.state.library
@@ -206,6 +234,24 @@ def original_video(jid: str, request: Request):
 @app.post('/api/jobs/{jid}/cancel')
 def cancel_job(jid: str, request: Request):
     return request.app.state.library.cancel(jid)
+
+
+@app.post('/api/jobs/{jid}/open-source')
+def open_source_for_verification(jid: str, request: Request):
+    """Open only this job's original public URL in the user's default browser.
+
+    This is intentionally an explicit, user-clicked escape hatch for a platform
+    login or CAPTCHA; it never exports cookies or tries to complete verification.
+    """
+    job = request.app.state.library.get(jid)
+    if job.get('platform') not in {'douyin', 'youtube', 'tiktok'}:
+        raise ValueError('只有登录或验证失败的抖音、YouTube、TikTok 任务可以打开原视频')
+    parsed = urlparse(job.get('url') or '')
+    if parsed.scheme not in {'http', 'https'} or not parsed.hostname:
+        raise ValueError('此任务没有可在浏览器打开的原始链接')
+    if not webbrowser.open(job['url'], new=2):
+        raise ValueError('无法打开默认浏览器，请手动复制原始链接')
+    return {'opened': True, 'message': '已在默认浏览器打开原视频。请自行完成登录或验证后下载文件，再使用“电脑里的视频”导入。'}
 
 
 @app.post('/api/jobs/{jid}/summary', status_code=202)
