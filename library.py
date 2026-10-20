@@ -7,6 +7,7 @@ import math
 import os
 import re
 import sqlite3
+import sys
 import threading
 import time
 import uuid
@@ -20,7 +21,9 @@ from storage import StorageMixin
 from handoff import build_handoff, make_storyboard
 from audio_utils import prepare_audio
 import shutil
+import subprocess
 from local_media import inspect_media, original_path, save_video_copy
+from runtime_paths import executable
 
 TERMINAL = {'done', 'error', 'cancelled', 'interrupted'}
 PROFILES = {'fast': 'base', 'balanced': 'small', 'accurate': 'medium'}
@@ -96,11 +99,15 @@ class Library(StorageMixin):
         self.last_saved = {}
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='video-job')
         self.ai_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='video-summary')
+        self.clip_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='video-clip')
         for job in self.jobs.values():
             if job['status'] not in TERMINAL:
                 job.update(status='interrupted', stage='上次退出时任务中断，可重新处理')
             if job.get('summary_status') == 'running':
                 job.update(summary_status='error', summary_error='上次退出时摘要中断，可重试')
+            for clip in job.get('clips') or []:
+                if clip.get('status') in {'queued', 'running'}:
+                    clip.update(status='error', error='上次退出时片段导出中断，请重新导出')
             self._save(job)
 
     def _save(self, job):
@@ -436,6 +443,107 @@ class Library(StorageMixin):
                 raise ValueError('视频缓存不安全，已拒绝保存')
             return save_video_copy(source, job['video_file'])
 
+    def clip_source(self, jid):
+        """Return only a video explicitly owned or referenced by this job."""
+        job = self.get(jid)
+        if job.get('local_source'):
+            source = original_path(job)
+            if source and job['local_source'].get('has_video'):
+                return source
+            raise ValueError('本地原视频已移动、删除或修改，请重新导入')
+        name = job.get('video_file')
+        if not name:
+            raise ValueError('此任务没有已下载的视频，请选择“文字 + 视频”重新处理')
+        source = self.job_dir(jid) / name
+        if source.is_symlink() or source.resolve().parent != self.job_dir(jid) or not source.is_file():
+            raise ValueError('视频缓存不存在或不安全，请重新处理该任务')
+        return source
+
+    def export_clip(self, jid, start, end, mode='precise'):
+        if mode not in {'precise', 'copy'}:
+            raise ValueError('未知的导出方式')
+        if not (isinstance(start, (int, float)) and isinstance(end, (int, float))):
+            raise ValueError('截取时间必须是数字')
+        start, end = round(float(start), 3), round(float(end), 3)
+        if start < 0 or end <= start or end - start < .05:
+            raise ValueError('结束时间必须大于开始时间，且片段至少 0.05 秒')
+        with self.lock:
+            job = self.get(jid)
+            duration = float(job.get('duration') or 0)
+            if duration and end > duration + .05:
+                raise ValueError('结束时间超出视频时长')
+            self.clip_source(jid)
+            if not executable('ffmpeg'):
+                raise ValueError('未找到 FFmpeg，无法导出片段。请安装 FFmpeg 后重试')
+            clip_id = uuid.uuid4().hex
+            name = f'clip-{clip_id[:8]}.mp4'
+            clip = {'id':clip_id, 'start':start, 'end':end, 'duration':round(end-start,3),
+                    'mode':mode, 'status':'queued', 'name':name, 'created':time.time()}
+            clips = list(job.get('clips') or []) + [clip]
+            self.update(jid, clips=clips)
+            self.clip_pool.submit(self._export_clip, jid, clip_id)
+            return self.get(jid)
+
+    def _export_clip(self, jid, clip_id):
+        try:
+            with self.lock:
+                job = self.get(jid)
+                clip = next(item for item in job.get('clips', []) if item['id'] == clip_id)
+                source = self.clip_source(jid)
+                destination = self.job_dir(jid) / clip['name']
+                self._set_clip(jid, clip_id, status='running', stage='正在导出片段')
+            duration = f"{clip['duration']:.3f}"
+            command = [executable('ffmpeg') or 'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y']
+            if clip['mode'] == 'copy':
+                # Input seek keeps stream-copy output decodable, at the cost of
+                # starting on a nearby keyframe rather than the exact timestamp.
+                command += ['-ss', f"{clip['start']:.3f}", '-i', str(source), '-t', duration,
+                            '-map', '0:v:0?', '-map', '0:a:0?', '-c', 'copy']
+            else:
+                command += ['-i', str(source), '-ss', f"{clip['start']:.3f}", '-t', duration,
+                            '-map', '0:v:0?', '-map', '0:a:0?', '-c:v', 'libx264', '-preset', 'veryfast',
+                            '-crf', '18', '-c:a', 'aac', '-movflags', '+faststart']
+            command.append(str(destination))
+            result = subprocess.run(command, capture_output=True, text=True, timeout=3600,
+                                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0) if os.name == 'nt' else 0)
+            if result.returncode or not destination.is_file() or destination.stat().st_size < 1024:
+                destination.unlink(missing_ok=True)
+                raise RuntimeError('FFmpeg 未能生成有效 MP4；请尝试“精准导出”或确认源视频可以播放')
+            with self.lock:
+                job = self.get(jid)
+                self._set_clip(jid, clip_id, status='done', finished=time.time(), bytes=destination.stat().st_size)
+                self.update(jid, assets=list(dict.fromkeys(job.get('assets', []) + [clip['name']])) )
+        except subprocess.TimeoutExpired:
+            self._set_clip(jid, clip_id, status='error', error='导出超时，请截取更短片段后重试')
+        except Exception as exc:
+            self._set_clip(jid, clip_id, status='error', error=str(exc)[-500:])
+
+    def _set_clip(self, jid, clip_id, **fields):
+        with self.lock:
+            job = self.jobs[jid]
+            clips = copy.deepcopy(job.get('clips') or [])
+            for clip in clips:
+                if clip['id'] == clip_id:
+                    clip.update(fields)
+                    self.update(jid, clips=clips)
+                    return
+            raise KeyError(clip_id)
+
+    def open_clip_location(self, jid, clip_id):
+        with self.lock:
+            job = self.get(jid)
+            clip = next((item for item in job.get('clips', []) if item.get('id') == clip_id), None)
+            if not clip or clip.get('status') != 'done':
+                raise ValueError('导出文件尚未准备好')
+            path = self.asset(jid, clip['name'])
+        if os.name == 'nt':
+            os.startfile(str(path.parent))
+        elif sys.platform == 'darwin':
+            subprocess.run(['open', '-R', str(path)], check=False, timeout=15)
+        else:
+            raise ValueError('当前系统不支持打开文件位置')
+        return {'opened': True}
+
     def summarize(self, jid, vision=False):
         from summaries import configuration
         configuration()
@@ -488,5 +596,6 @@ class Library(StorageMixin):
             event.set()
         self.pool.shutdown(wait=True)
         self.ai_pool.shutdown(wait=True)
+        self.clip_pool.shutdown(wait=True)
         self.db.close()
         self.instance_lock.close()

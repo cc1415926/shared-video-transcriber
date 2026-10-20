@@ -8,6 +8,7 @@ import struct
 import sys
 from pathlib import Path
 from version import __version__
+from runtime_paths import browser_executable, executable, runtime_dirs, user_data_dir
 
 PACKAGES=('fastapi','uvicorn','faster-whisper','ctranslate2','av','playwright','yt-dlp','mcp','pillow','python-dotenv')
 
@@ -27,18 +28,20 @@ def collect():
     missing=[p for p,v in versions.items() if v is None]
     add('Python 依赖','error' if missing else 'ok','缺少：'+', '.join(missing) if missing else '所需软件包均已安装',
         '重新运行启动器，让它补齐依赖；仍失败时查看 .setup-logs。' if missing else '')
-    ffmpeg=bool(shutil.which('ffmpeg'))
+    ffmpeg=bool(executable('ffmpeg'))
     add('ffmpeg','ok' if ffmpeg else 'warning','已找到视频合并程序' if ffmpeg else '未找到外部 ffmpeg',
         '本地视频和仅转录仍可用；下载 B 站完整视频前请安装 ffmpeg。' if not ffmpeg else '')
     browser=False
+    system_browser=browser_executable()
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:browser=Path(p.chromium.executable_path).is_file()
     except Exception:
         pass
-    add('Chromium','ok' if browser else 'warning','网页解析内核已安装' if browser else '网页解析内核未就绪',
-        '重新运行启动器安装 Chromium；本地视频不依赖它。' if not browser else '')
-    root=Path(os.environ.get('VIDEO_DATA_DIR',str(Path(__file__).resolve().parent/'.data')))
+    add('浏览器','ok' if browser or system_browser else 'warning',
+        'Playwright Chromium 已安装' if browser else ('将复用系统 Chrome/Edge' if system_browser else '网页解析浏览器未就绪'),
+        '重新运行启动器安装 Chromium；本地视频不依赖它。' if not (browser or system_browser) else '')
+    root=user_data_dir()
     while not root.exists() and root.parent!=root:root=root.parent
     try:
         free=shutil.disk_usage(root).free/1073741824

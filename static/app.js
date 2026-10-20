@@ -2,7 +2,7 @@
 const $ = id => document.getElementById(id);
 const terminal = new Set(['done','error','cancelled','interrupted']);
 const requestedJob=new URLSearchParams(location.search).get('job')||'';
-const state = {token:'',health:null,jobs:[],selected:/^[a-f0-9]{32}$/.test(requestedJob)?requestedJob:localStorage.getItem('video.selected'),job:null,tab:'overview',lastRender:'',historyKey:'',page:'home',filter:'all',verificationOpened:new Set()};
+const state = {token:'',health:null,jobs:[],selected:/^[a-f0-9]{32}$/.test(requestedJob)?requestedJob:localStorage.getItem('video.selected'),job:null,tab:'overview',lastRender:'',historyKey:'',page:'home',filter:'all',verificationOpened:new Set(),clipPreviewEnd:null};
 const fmt = sec => {const n=Math.max(0,Math.floor(sec||0));return (n>=3600?Math.floor(n/3600)+':':'')+String(Math.floor(n/60)%60).padStart(2,'0')+':'+String(n%60).padStart(2,'0');};
 const mb = n => ((n||0)/1048576).toFixed(1)+' MB';
 const labels = {done:'已完成',running:'处理中',queued:'排队中',cancelling:'正在停止',cancelled:'已取消',error:'失败',interrupted:'已中断'};
@@ -110,6 +110,7 @@ function renderContent(){
   visible('spoken-script-link',job.status==='done'&&job.assets.includes('spoken-script.txt'));
   $('spoken-script-link').href=assetUrl('spoken-script.txt');$('spoken-script-link').download='口播稿.txt';
   visible('save-video',!!job.video_file);$('save-video').disabled=job.status!=='done';
+  visible('clip-video',job.status==='done'&&!!(job.video_file||job.local_video_available));
   $('copy').disabled=!job.transcript;
   if(typeof renderEnhancements==='function')renderEnhancements();
 }
@@ -144,8 +145,55 @@ function render(){
   const isChannels=job.platform==='wechat_channels';
   visible('channels-source-panel',isChannels);
   if(isChannels)$('channels-source-text').textContent=['作品 ID：'+(metadata.work_id||'未获取'),'作者：'+(metadata.author||'未获取'),'原始发布文案：'+(metadata.original_caption||'未获取'),'话题标签：'+((metadata.hashtags||[]).join('、')||'未获取')].join('\n');
-  const key=JSON.stringify([job.id,job.status,job.segments,job.frames,job.summary,job.summary_status,job.summary_error,job.rewrite_script,job.rewrite_status,job.assets,job.revision,job.media_cleaned,job.cache_cleaned,job.media_available,job.local_video_available]);
+  const key=JSON.stringify([job.id,job.status,job.segments,job.frames,job.summary,job.summary_status,job.summary_error,job.rewrite_script,job.rewrite_status,job.assets,job.clips,job.revision,job.media_cleaned,job.cache_cleaned,job.media_available,job.local_video_available]);
   if(key!==state.lastRender){state.lastRender=key;renderContent();}
+  renderClips();
+}
+function clipSeconds(id){return Number($(id).value)||0;}
+function setClipValues(start,end,focus='start'){
+  const duration=Number(state.job?.duration)||0;start=Math.max(0,Math.min(start,duration));end=Math.max(0,Math.min(end,duration));
+  if(end<=start)end=Math.min(duration,start+.05);if(end<=start)start=Math.max(0,end-.05);
+  for(const [id,value] of [['clip-start',start],['clip-end',end],['clip-start-input',start],['clip-end-input',end]])$(id).value=value.toFixed(2);
+  $('clip-duration').textContent='片段时长：'+fmt(Math.max(0,end-start));
+  seekClipPreviewFrame(focus.startsWith('end')?end:start);
+}
+function seekClipPreviewFrame(seconds){
+  const video=$('clip-preview-player');
+  const duration=Number(state.job?.duration)||0;
+  // Seeking exactly to EOF often renders black; show the nearest displayable frame.
+  const target=Math.max(0,Math.min(seconds,Math.max(0,duration-.04)));
+  video.dataset.frameSeek=String(target);
+  state.clipPreviewEnd=null;
+  if(video.readyState>=1){video.pause();video.currentTime=target;}
+}
+function syncClipValues(changed){
+  let start=clipSeconds(changed==='start-input'?'clip-start-input':'clip-start');
+  let end=clipSeconds(changed==='end-input'?'clip-end-input':'clip-end');
+  if(changed.startsWith('start')&&start>=end)end=start+.05;
+  if(changed.startsWith('end')&&end<=start)start=Math.max(0,end-.05);
+  setClipValues(start,end,changed);
+}
+function renderClips(){
+  const parent=$('clip-results');if(!parent||!state.job)return;parent.replaceChildren();
+  for(const clip of state.job.clips||[]){
+    const row=node('div',undefined,'clip-result');row.append(node('strong',clip.name),node('small',fmt(clip.start)+' – '+fmt(clip.end)+' · '+(clip.mode==='copy'?'极速无损':'精准导出')+' · '+({queued:'排队中',running:'正在导出',done:'已完成',error:'失败'}[clip.status]||clip.status)));
+    if(clip.status==='done'){
+      const download=node('a','下载 MP4','button-link');download.href=assetUrl(clip.name);download.download=clip.name;
+      const locate=node('button','打开文件位置','text-button');locate.onclick=async()=>{try{await api('/jobs/'+state.job.id+'/clips/'+clip.id+'/open-location',{});}catch(e){toast(e.message);}};
+      row.append(download,locate);
+    }else if(clip.status==='error')row.append(node('p',clip.error||'导出失败','error'));
+    parent.append(row);
+  }
+}
+function openClipDialog(){
+  const duration=Number(state.job?.duration)||0;
+  if(!duration)return toast('无法读取视频时长，暂不能截取。');
+  for(const id of ['clip-start','clip-end']){$(id).max=duration;}
+  const preview=$('clip-preview-player');const source=state.job.local_video_available?'/api/jobs/'+state.job.id+'/original':assetUrl(state.job.video_file);
+  if(preview.getAttribute('src')!==source){preview.pause();preview.src=source;preview.load();}
+  setClipValues(Math.max(0,Math.min($('player').currentTime||0,Math.max(0,duration-.05))),Math.min(duration,($('player').currentTime||0)+10));
+  $('clip-dialog').querySelector('.muted').textContent='拖动起点或终点时，下面的视频播放器会直接定位并暂停在对应画面。原视频不会被改写；精准导出会重新编码 MP4，极速无损导出会受关键帧影响。';
+  visible('clip-error',false);renderClips();$('clip-dialog').showModal();
 }
 async function submit(body,endpoint='/jobs'){
   $('submit').disabled=true;visible('form-error',false);
@@ -184,6 +232,32 @@ $('save-video').onclick=async()=>{
     toast(result.saved?'视频已保存为：'+result.name:'已取消保存，视频仍保留在应用缓存。');
   }catch(e){toast(e.message||'保存视频失败，请稍后重试。');}
   finally{button.disabled=false;button.textContent=original;}
+};
+$('clip-video').onclick=openClipDialog;
+$('clip-start').oninput=()=>syncClipValues('start');
+$('clip-end').oninput=()=>syncClipValues('end');
+$('clip-start-input').onchange=()=>syncClipValues('start-input');
+$('clip-end-input').onchange=()=>syncClipValues('end-input');
+$('clip-set-start').onclick=()=>setClipValues($('clip-preview-player').currentTime,clipSeconds('clip-end'));
+$('clip-set-end').onclick=()=>setClipValues(clipSeconds('clip-start'),$('clip-preview-player').currentTime);
+$('clip-preview').onclick=async()=>{
+  const start=clipSeconds('clip-start'),end=clipSeconds('clip-end');
+  if(end<=start)return toast('请选择有效的起止时间。');
+  const preview=$('clip-preview-player');state.clipPreviewEnd=end;preview.currentTime=start;
+  try{await preview.play();}catch{toast('浏览器未能播放此视频编码，请下载后使用本地播放器预览。');}
+};
+$('clip-preview-player').ontimeupdate=()=>{const preview=$('clip-preview-player');if(state.clipPreviewEnd!==null&&preview.currentTime>=state.clipPreviewEnd){preview.pause();state.clipPreviewEnd=null;}};
+$('clip-preview-player').onerror=()=>toast('浏览器无法预览此视频编码；仍可导出 MP4 后用本地播放器打开。');
+$('clip-preview-player').onloadedmetadata=()=>seekClipPreviewFrame(Number($('clip-preview-player').dataset.frameSeek||clipSeconds('clip-start')));
+$('player').onerror=()=>toast('浏览器无法播放此视频编码；可下载原视频后使用本地播放器，或尝试截取后再播放。');
+$('clip-export').onclick=async()=>{
+  const start=clipSeconds('clip-start'),end=clipSeconds('clip-end'),button=$('clip-export');
+  visible('clip-error',false);
+  if(end<=start){$('clip-error').textContent='结束时间必须大于开始时间。';visible('clip-error',true);return;}
+  button.disabled=true;button.textContent='正在创建导出任务…';
+  try{state.job=await api('/jobs/'+state.job.id+'/clips',{start,end,mode:$('clip-mode').value});render();toast('片段已加入导出队列。');}
+  catch(e){$('clip-error').textContent=e.message;visible('clip-error',true);}
+  finally{button.disabled=false;button.textContent='导出片段';}
 };
 $('settings-button').onclick=()=>{const h=state.health;$('health-info').replaceChildren(node('p',h?'语音识别：'+h.device+'；ffmpeg：'+(h.ffmpeg?'可用':'未安装')+'；AI：'+(h.ai_configured?h.ai_host:'未配置'):'本地服务未连接'),node('p',h?'结果目录：'+h.data_dir:''));$('settings-dialog').showModal();};
 document.querySelectorAll('.close-dialog').forEach(button=>button.onclick=()=>button.closest('dialog').close());

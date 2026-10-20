@@ -7,6 +7,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 from configuration import load_settings
+from runtime_paths import prepare_runtime, user_data_dir
 
 load_settings()
 
@@ -15,7 +16,7 @@ from webapp import app
 
 
 def find_existing():
-    root = Path(os.environ.get('VIDEO_DATA_DIR', str(Path(__file__).resolve().parent / '.data'))).resolve()
+    root = user_data_dir()
     explicit = os.environ.get('VIDEO_PORT') or os.environ.get('GRADIO_SERVER_PORT')
     ports = list(dict.fromkeys(([int(explicit)] if explicit else []) + list(range(7860, 7880))))
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -49,6 +50,7 @@ def choose_port():
 
 
 if __name__ == '__main__':
+    prepare_runtime()
     existing = find_existing()
     if existing:
         print(f'视频收件箱已经在运行：{existing}', flush=True)

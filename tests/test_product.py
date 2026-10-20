@@ -6,6 +6,7 @@ import time
 import unittest
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 from handoff import build_handoff
@@ -138,6 +139,29 @@ class EditingTests(unittest.TestCase):
                     with self.assertRaises(ValueError):lib.edit_segments(jid,0,[change])
                 lib.jobs[jid]['summary_status']='running'
                 with self.assertRaises(ValueError):lib.edit_segments(jid,0,[{'index':0,'text':'x'}])
+            finally:lib.close()
+
+
+class ClipTests(unittest.TestCase):
+    def test_clip_export_is_scoped_to_job_and_preserves_source(self):
+        with tempfile.TemporaryDirectory() as root:
+            lib=Library(root)
+            try:
+                jid,d=fixture(lib)
+                source=d/'bilibili_video.mp4';before=source.read_bytes()
+                def fake_run(command, **kwargs):
+                    Path(command[-1]).write_bytes(b'x'*2048)
+                    return SimpleNamespace(returncode=0)
+                with patch('library.shutil.which',return_value='ffmpeg'),patch('library.subprocess.run',side_effect=fake_run):
+                    queued=lib.export_clip(jid,0,3,'precise')
+                    self.assertEqual(queued['clips'][-1]['status'],'queued')
+                    lib.clip_pool.shutdown(wait=True)
+                result=lib.get(jid);clip=result['clips'][-1]
+                self.assertEqual(clip['status'],'done')
+                self.assertIn(clip['name'],result['assets'])
+                self.assertTrue((d/clip['name']).is_file())
+                self.assertEqual(source.read_bytes(),before)
+                with self.assertRaises(ValueError):lib.export_clip(jid,3,3)
             finally:lib.close()
 
 

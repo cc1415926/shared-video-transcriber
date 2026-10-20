@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
-export PYTHONUTF8=1
-if command -v python3 >/dev/null 2>&1; then
-    exec python3 bootstrap.py "$@"
-elif command -v python >/dev/null 2>&1; then
-    exec python bootstrap.py "$@"
-else
-    echo "Install 64-bit Python 3.12 from https://www.python.org/downloads/ and run again."
-    exit 1
-fi
+args=()
+start=1
+for arg in "$@"; do
+    case "$arg" in
+        --check) args+=(--check); start=0 ;;
+        --install-only) start=0 ;;
+        --skip-browser) args+=(--skip-browser) ;;
+        *) args+=("$arg") ;;
+    esac
+done
+if [[ "$start" == 1 ]]; then args+=(--start); fi
+exec bash scripts/deploy.sh "${args[@]}"

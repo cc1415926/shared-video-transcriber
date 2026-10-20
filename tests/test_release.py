@@ -11,6 +11,20 @@ from scripts.package_source import validate_files
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_agent_deployment_files_use_locked_dependencies_without_security_bypass(self):
+        root=Path(__file__).resolve().parents[1]
+        for name in ('AGENTS.md','requirements.lock','scripts/deploy.ps1','scripts/deploy.sh','docs/AGENT_DEPLOYMENT.md'):
+            self.assertTrue((root/name).is_file(),name)
+        windows=(root/'scripts/deploy.ps1').read_text(encoding='utf-8')
+        macos=(root/'scripts/deploy.sh').read_text(encoding='utf-8')
+        lock=(root/'requirements.lock').read_text(encoding='utf-8')
+        self.assertIn('uv pip install',windows)
+        self.assertIn('requirements.lock',windows)
+        self.assertIn('requirements.lock',macos)
+        self.assertNotIn('ExecutionPolicy Bypass',windows)
+        self.assertNotIn('--trusted-host',windows+macos)
+        self.assertIn('pywin32==312 ; sys_platform == \'win32\'',lock)
+
     def test_env_file_preserves_explicit_environment_and_literal_values(self):
         with tempfile.TemporaryDirectory() as root,patch.dict(os.environ,{'VIDEO_AI_API_KEY':'existing'}):
             (Path(root)/'.env').write_text('VIDEO_AI_API_KEY=from-file\nVIDEO_RELEASE_TEST=literal$dollar\n',encoding='utf-8')

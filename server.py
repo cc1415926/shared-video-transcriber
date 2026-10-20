@@ -34,6 +34,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, urlencode, urljoin
 from configuration import load_settings
+from runtime_paths import browser_executable, executable
 
 load_settings()
 
@@ -71,21 +72,12 @@ _DETAIL_RESPONSE_TIMEOUT = 18.0
 
 
 def _playwright_chromium_executable() -> str | None:
-    """Use an explicitly configured or already-installed Playwright Chromium.
+    """Prefer an explicit or normally installed compatible Chromium browser.
 
-    Windows machines can retain a newer Playwright browser cache after a Python
-    dependency upgrade.  Falling back to that cache is safer than asking the
-    user to download another 180 MB browser, and never searches arbitrary
-    locations.
+    Playwright's own configured browser cache is tried first by ``launch()``.
+    This fallback avoids a compulsory Chromium download on both supported OSes.
     """
-    configured = os.environ.get("VIDEO_PLAYWRIGHT_CHROMIUM", "").strip()
-    if configured and Path(configured).is_file():
-        return configured
-    local = os.environ.get("LOCALAPPDATA")
-    if not local:
-        return None
-    candidates = list((Path(local) / "ms-playwright").glob("chromium-*/chrome-win64/chrome.exe"))
-    return str(max(candidates, key=lambda item: item.parent.parent.stat().st_mtime)) if candidates else None
+    return browser_executable()
 _DETAIL_RESPONSE_RETRIES = 1
 _BILIBILI_VIDEO_FORMAT = (
     "bv*[vcodec^=avc1][ext=mp4]+ba[ext=m4a]/"
@@ -758,7 +750,7 @@ def _download_bilibili_transcription_media_sync(url: str, out_dir: str, progress
 
 
 def _probe_media_streams(path: str) -> list[dict] | None:
-    if not shutil.which("ffprobe"):
+    if not executable("ffprobe"):
         try:
             import av
             with av.open(path) as container:
@@ -767,7 +759,7 @@ def _probe_media_streams(path: str) -> list[dict] | None:
             return None
     proc = subprocess.run(
         [
-            "ffprobe",
+            executable("ffprobe") or "ffprobe",
             "-v",
             "error",
             "-show_entries",
@@ -843,7 +835,7 @@ def _find_downloaded_file(out_dir: str, before: set[str]) -> str:
 
 
 def _download_bilibili_video_via_api_sync(url: str, out_dir: str, progress_cb=None) -> str:
-    if not shutil.which('ffmpeg'):
+    if not executable('ffmpeg'):
         raise RuntimeError('下载完整 Bilibili 视频需要 ffmpeg，请安装后重试')
     view, playurl, bvid = _bilibili_view_and_playurl_sync(url, qn=64)
     Path(out_dir, 'metadata.json').write_text(json.dumps({'title': view.get('title'), 'author': (view.get('owner') or {}).get('name'), 'duration': view.get('duration'), 'source_url': url}, ensure_ascii=False), encoding='utf-8')
@@ -881,14 +873,14 @@ def _download_bilibili_video_via_api_sync(url: str, out_dir: str, progress_cb=No
     if hasattr(progress_cb, 'stage'):
         progress_cb.stage('合并音视频')
 
-    if not shutil.which("ffmpeg"):
+    if not executable("ffmpeg"):
         raise RuntimeError(
             "Bilibili API fallback 已下载音视频分片，但合并 MP4 需要 ffmpeg。"
             "请安装 ffmpeg 后重试，例如 winget install Gyan.FFmpeg。"
         )
     proc = subprocess.run(
         [
-            "ffmpeg",
+            executable("ffmpeg") or "ffmpeg",
             "-y",
             "-i",
             video_path,

@@ -19,9 +19,10 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from library import Library
 from local_media import pick_file, original_path
+from runtime_paths import executable, prepare_runtime, resource_dir, user_data_dir
 from version import __version__
 
-BASE = Path(__file__).resolve().parent
+BASE = resource_dir()
 
 
 def transport_errors(loop, context):
@@ -36,11 +37,12 @@ def transport_errors(loop, context):
 
 @asynccontextmanager
 async def lifespan(app):
+    prepare_runtime()
     loop = asyncio.get_running_loop()
     previous_handler = loop.get_exception_handler()
     loop.set_exception_handler(transport_errors)
     app.state.token = secrets.token_urlsafe(32)
-    app.state.library = Library(os.environ.get('VIDEO_DATA_DIR', str(BASE / '.data')))
+    app.state.library = Library(user_data_dir())
     try:
         yield
     finally:
@@ -150,6 +152,12 @@ class RewriteInput(BaseModel):
     requirements: str = Field(default='', max_length=4000)
 
 
+class ClipInput(BaseModel):
+    start: float = Field(ge=0, le=86400)
+    end: float = Field(gt=0, le=86400)
+    mode: Literal['precise', 'copy'] = 'precise'
+
+
 @app.exception_handler(KeyError)
 async def missing(request, exc):
     return JSONResponse({'detail': '任务或文件不存在'}, status_code=404)
@@ -166,7 +174,7 @@ def health(request: Request):
     parsed=urlparse(base)
     configured = bool(base and os.environ.get('VIDEO_AI_MODEL') and (os.environ.get('VIDEO_AI_API_KEY') or parsed.hostname in {'localhost','127.0.0.1','::1'}))
     return {'status': 'ok', 'service': 'video-inbox', 'version': __version__, 'token': request.app.state.token,
-            'ffmpeg': bool(shutil.which('ffmpeg')), 'ai_configured': configured,
+            'ffmpeg': bool(executable('ffmpeg')), 'ai_configured': configured,
             'ai_host': parsed.hostname if configured else None,
             'device': os.environ.get('VIDEO_WHISPER_DEVICE', 'cpu'),
             'data_dir': str(request.app.state.library.root)}
@@ -289,6 +297,16 @@ def source_audio(jid: str, request: Request):
 @app.post('/api/jobs/{jid}/save-video')
 def save_video(jid: str, request: Request):
     return request.app.state.library.save_video(jid)
+
+
+@app.post('/api/jobs/{jid}/clips', status_code=202)
+def export_clip(jid: str, body: ClipInput, request: Request):
+    return request.app.state.library.export_clip(jid, **body.model_dump())
+
+
+@app.post('/api/jobs/{jid}/clips/{clip_id}/open-location')
+def open_clip_location(jid: str, clip_id: str, request: Request):
+    return request.app.state.library.open_clip_location(jid, clip_id)
 
 
 @app.get('/api/jobs/{jid}/handoff')

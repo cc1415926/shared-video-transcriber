@@ -4,19 +4,20 @@
 
 这是一个本地优先的个人应用。新版使用独立网页 + FastAPI，替换了原先的 Gradio 界面，保留旧 MCP 工具。
 
-**第一次使用：** [下载源码 ZIP](https://github.com/ZY-ZhichaoYu/shared-video-transcriber/archive/refs/heads/main.zip)，完整解压后启动。不需要 Git，不需要 AI key。
+## 让 Agent 一键部署（推荐）
 
-| 你的电脑 | 启动方式 |
+将仓库地址交给 Codex、Claude Code 或 WorkBuddy，并让它先读 [AGENTS.md](AGENTS.md)。Agent 在仓库根目录只需执行一条命令：
+
+| 你的电脑 | 部署并启动 |
 |---|---|
-| Windows 10 / 11，64 位 | 先安装 [Python 3.12](https://www.python.org/downloads/) 并勾选 Add python.exe to PATH，然后双击 run_web.bat |
-| macOS / Linux | 安装 64 位 Python 3.10–3.14，在解压目录运行 bash run_web.sh |
+| Windows 10 / 11，64 位 | `.\scripts\deploy.ps1 -Start` |
+| macOS Apple Silicon / Intel | `bash scripts/deploy.sh --start` |
 
-这仍是源码版，不是免 Python 的 EXE。首次需要联网安装依赖、浏览器内核和选用的语音模型。
-只处理本地视频时，可用 python bootstrap.py --skip-browser 跳过网页内核下载。
-完整 Bilibili 视频合并另需 ffmpeg；未安装时，本地视频和仅转录仍可使用。
+脚本使用固定版本的 `uv` 与 [requirements.lock](requirements.lock) 建立项目专属 `.venv`，复用已有 Python/uv 缓存、Chrome/Edge/Chromium 和 FFmpeg。缺少浏览器时才下载 Playwright Chromium；faster-whisper 模型不在安装时下载，而在首次选用识别档位时按需下载。服务只监听本机 `127.0.0.1`，启动后终端会显示实际地址（通常为 http://127.0.0.1:7860）。
 
-遇到问题先双击 **check_environment.bat**，或在网页“设置”里点击“检查运行环境”。
-新手说明、常见报错和安全升级方法见 [使用指南](docs/GETTING_STARTED.md)。
+完整提示词、失败恢复、可选 FFmpeg、环境自检和 MCP 配置见 [Agent 部署说明](docs/AGENT_DEPLOYMENT.md)。也可下载 [源码 ZIP](https://github.com/ZY-ZhichaoYu/shared-video-transcriber/archive/refs/heads/main.zip) 后完整解压再执行同一命令；不需要 Git 或 AI key。
+
+旧的 `run_web.bat` / `run_web.ps1` / `run_web.sh` 仍保留，已转发到同一部署流程。遇到问题可双击 **check_environment.bat**，或在网页“设置”里点击“检查运行环境”。新手说明、常见报错和安全升级方法见 [使用指南](docs/GETTING_STARTED.md)。
 
 ## 怎么用
 
@@ -82,6 +83,14 @@ B 站视频依次显示下载画面、下载声音、合并。转录按已识别
 导出包不包含原视频及本地绝对路径，参考材料另存 reference-notes.txt。
 本地任务的清理仅删除应用缓存，原视频永远不在该清理范围内。
 长会议仍需等待本机 CPU 识别；当前未做说话人分离、自动逐段语言检测或完整幻灯片 OCR。
+
+## 视频片段截取（2.4）
+
+在保留原视频的视频详情页点击“截取片段”，用双端点时间轴或秒数输入选择开始和结束位置；可将播放器当前时间设为任一端点，并预览选中片段，播放到终点会自动暂停。
+
+默认“精准导出 MP4”使用本机 FFmpeg 重新编码 H.264/AAC，保留原始画幅比例与声音，不加水印；“极速无损导出”使用 stream copy，速度快但会受关键帧限制，起止时间可能不完全精确。导出文件保存在原任务历史中，不覆盖原视频，可下载、打开文件位置或从空间管理清理。
+
+截取 API 只接受已有任务 ID 与时间范围，绝不接收任意文件路径。需要系统 PATH 中可用的 `ffmpeg`；项目不捆绑 FFmpeg。FFmpeg 的许可证取决于所安装的构建，使用或分发时请遵守该构建的许可证；本项目没有引入 LosslessCut、react-range 或 noUiSlider 的源码或依赖。
 
 ## 微信视频号已下载文件（2.3）
 
@@ -207,8 +216,8 @@ GET /api/health 获取 token，写请求需带 X-Video-Token。支持创建、�
 
 Node 仅用于可选的 JavaScript 语法检查，运行网页不需要 Node。
 
-发布范围和仍需完成的工作见 [CHANGELOG.md](CHANGELOG.md) 与 [发布验收说明](docs/RELEASE_CHECKLIST.md)。
-关键直接依赖和原生组件版本受 constraints.txt 约束；它不是完整的跨平台依赖锁文件。
+发布范围和仍需完成的工作见 [CHANGELOG.md](CHANGELOG.md)、[发布验收说明](docs/RELEASE_CHECKLIST.md) 与 [安装包发布说明](docs/RELEASES.md)。
+部署使用 `requirements.lock` 固定 Windows/macOS 的完整 Python 依赖解析结果；修改 `requirements.txt` 或 `constraints.txt` 后，需用 `uv pip compile requirements.txt --universal -o requirements.lock` 更新并重新验证。
 尚无跨视频准确率基准；一次成功不能代表平台总体成功率。
 
 ## English

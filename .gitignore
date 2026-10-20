@@ -34,6 +34,8 @@ test-results/
 .setup-logs/
 .setup.lock
 dist/
+build/
+packaging/generated/
 REFACTOR_REPORT.md
 *.sqlite3*
 *.log
