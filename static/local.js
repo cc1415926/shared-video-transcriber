@@ -1,14 +1,14 @@
 'use strict';
-let localMode=false, channelsMode=false;
+let localMode=false;
 const onlineSubmit=$('job-form').onsubmit;
 const oldRetry=$('retry').onclick;
-function selectSource(local, channels=false){
-  localMode=local;channelsMode=channels;visible('local-input',local);visible('channels-metadata',channels);visible('channels-collector-status',channels);visible('online-input',!local);
+function selectSource(local){
+  localMode=local;visible('local-input',local);visible('online-input',!local);
   $('url').required=!local;$('local-path').required=local;
-  document.querySelector('.composer-heading h1').textContent=channels?'把已下载的视频号作品，放进收件箱。':local?'把本地视频，存成能读的记录。':'链接发来了，先看看讲了什么。';
-  document.querySelector('.composer-heading p').textContent=channels?'不读取聊天记录；只导入你明确选择的已完成视频文件。':local?'整理会议、报告和录屏；大文件无需上传。':'粘贴抖音、Bilibili 链接，或直接粘贴整段分享文字。';
-  document.querySelector('.platforms').textContent=channels?'微信视频号':local?'视频 / 音频':'抖音 / Bilibili';
-  for(const [id,active] of [['source-online',!local],['source-local',local&&!channels],['source-channels',channels]]){
+  document.querySelector('.composer-heading h1').textContent=local?'把本地视频，存成能读的记录。':'链接发来了，先看看讲了什么。';
+  document.querySelector('.composer-heading p').textContent=local?'整理会议、报告和录屏；大文件无需上传。':'粘贴抖音、Bilibili、YouTube 或 TikTok 链接，或直接粘贴整段分享文字。';
+  document.querySelector('.platforms').textContent=local?'视频 / 音频':'抖音 / Bilibili / YouTube / TikTok';
+  for(const [id,active] of [['source-online',!local],['source-local',local]]){
     $(id).classList.toggle('source-active',active);$(id).setAttribute('aria-pressed',String(active));
   }
   const download=document.querySelector('[name=mode][value=download]');
@@ -17,11 +17,9 @@ function selectSource(local, channels=false){
   $('mode-hint').textContent=local?'只读原文件，另存音轨、文字与抽样画面；原文件不会被清理。':'优先下载音频，本地识别，不需要 AI 密钥。';
   $('retention-label').textContent=local?'完成后删除应用音轨缓存，保留文字、截图与原文件':'完成后删除音视频，保留文字与截图';
   $('retention-hint').textContent=local?'原视频不受影响，仍可回看':'节省空间；之后复听需要重新下载';
-  if(channels)$('channels-collector-status').textContent='采集器状态：已下载文件可导入；文件传输助手自动转发当前不可用（上游功能已失效），请在电脑微信页面下载后选择文件。';
 }
 $('source-online').onclick=()=>selectSource(false);
 $('source-local').onclick=()=>selectSource(true);
-$('source-channels').onclick=()=>selectSource(true,true);
 $('pick-local').onclick=async()=>{
   $('pick-local').disabled=true;
   try{const result=await api('/local/pick',{});if(result.path)$('local-path').value=result.path;}
@@ -40,8 +38,7 @@ $('job-form').onsubmit=event=>{
   const body={path:$('local-path').value,reference_url:$('local-reference-url').value,context_notes:$('local-context').value,
     profile:$('profile').value,mode:document.querySelector('[name=mode]:checked').value,language:$('language').value||null,
     hotwords:$('hotwords').value,force:$('force').checked,cleanup_after:$('cleanup-after').checked};
-  if(channelsMode){Object.assign(body,{work_id:$('channels-work-id').value,title:$('channels-title').value,author:$('channels-author').value,original_caption:$('channels-caption').value,hashtags:$('channels-tags').value.split(/[，,\s]+/).filter(Boolean),source_url:$('channels-url').value});}
-  submit(body,channelsMode?'/channels/local/jobs':'/local/jobs');
+  submit(body,'/local/jobs');
 };
 $('retry').onclick=()=>{
   const j=state.job;if(!j.local_source){oldRetry();return;}

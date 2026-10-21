@@ -51,32 +51,6 @@ class LocalMediaTests(unittest.TestCase):
             source.write_bytes(b'changed')
             self.assertIsNone(original_path({'local_source':info}))
 
-    def test_wechat_channels_metadata_is_durable_and_separate_from_transcript(self):
-        with tempfile.TemporaryDirectory() as root,patch('library.transcribe',fake_transcribe):
-            source=create_audio(root);lib=Library(Path(root)/'cache')
-            try:
-                job=lib.submit_local(str(source),mode='transcript',source_platform='wechat_channels',
-                    source_metadata={'work_id':'oid-1','title':'真实标题','author':'作者','original_caption':'原始文案','hashtags':['#话题']})
-                lib.pool.shutdown(wait=True);result=lib.get(job['id'])
-                self.assertEqual(result['platform'],'wechat_channels')
-                self.assertEqual(result['author'],'作者')
-                self.assertEqual(result['source_metadata']['original_caption'],'原始文案')
-                handoff=lib.handoff(job['id'])['text']
-                self.assertIn('原始发布文案：原始文案',handoff)
-                self.assertTrue(result['transcript'])
-                self.assertNotEqual(result['transcript'],'原始文案')
-            finally:lib.close()
-
-    def test_wechat_channels_api_import(self):
-        with tempfile.TemporaryDirectory() as root,patch('library.transcribe',fake_transcribe),patch.dict(os.environ,{'VIDEO_DATA_DIR':str(Path(root)/'cache')}),TestClient(app) as client:
-            source=create_audio(root);headers={'X-Video-Token':client.get('/api/health').json()['token']}
-            response=client.post('/api/channels/local/jobs',json={'path':str(source),'mode':'transcript','title':'标题','author':'作者','original_caption':'文案','hashtags':['#A'],'work_id':'oid'},headers=headers)
-            self.assertEqual(response.status_code,202,response.text)
-            app.state.library.pool.shutdown(wait=True)
-            result=client.get('/api/jobs/'+response.json()['id']).json()
-            self.assertEqual(result['platform'],'wechat_channels')
-            self.assertEqual(result['source_metadata']['work_id'],'oid')
-
     def test_non_media_relative_and_network_paths_rejected(self):
         with tempfile.TemporaryDirectory() as root:
             bad=Path(root)/'secret.txt';bad.write_text('private')

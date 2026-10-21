@@ -158,6 +158,7 @@ async function openStorage(jid=null){
   feature.storageJob=jid;resetPlan();$('storage-select-all').checked=false;
   const stats=await api('/storage');feature.storage=stats.jobs;
   $('storage-total').textContent='任务文件 '+mb(stats.total_bytes)+'，其中音视频 '+mb(stats.media_bytes)+'；磁盘剩余 '+(stats.free_bytes/1073741824).toFixed(1)+' GB';
+  await loadDataDir().catch(e=>setDataDirMessage(e.message,true));
   const list=$('storage-jobs');list.replaceChildren();
   for(const job of stats.jobs){
     const label=node('label',undefined,'storage-row');const check=node('input');check.type='checkbox';check.value=job.id;check.disabled=job.busy;check.checked=!job.busy&&job.id===jid;check.onchange=resetPlan;
@@ -167,6 +168,62 @@ async function openStorage(jid=null){
   }
   if(!$('storage-dialog').open)$('storage-dialog').showModal();
 }
+async function loadDataDir(){
+  const info=await api('/settings/data-dir');feature.dataDir=info;
+  $('data-dir-path').textContent=info.data_dir;
+  $('data-dir-badge').hidden=!info.custom;
+  $('reset-data-dir').hidden=!info.custom;
+  const parts=['已占用 '+mb(info.bytes)];
+  if(info.origin==='legacy')parts.push('当前用程序目录里的历史缓存，还没设过自定义位置');
+  if(info.origin==='default')parts.push('当前是系统默认位置');
+  if(info.env_override)parts.push('当前由环境变量 VIDEO_DATA_DIR 指定，界面改动会被它覆盖');
+  const last=info.last_migration;
+  if(last&&last.ok===false)parts.push('上次迁移失败：'+(last.error||'未知原因')+'，仍在用原目录');
+  else if(last&&last.ok===true)parts.push('上次已迁移 '+mb(last.bytes||0));
+  $('data-dir-meta').textContent=parts.join('；');
+}
+function setDataDirMessage(text,isError){
+  const box=$('data-dir-message');
+  box.hidden=false;box.className=isError?'path-status error':'path-status';box.textContent=text;
+}
+async function waitForRestart(timeout=30000){
+  const started=Date.now();
+  await new Promise(resolve=>setTimeout(resolve,1500));
+  while(Date.now()-started<timeout){
+    try{
+      const response=await fetch('/api/health',{cache:'no-store'});
+      if(response.ok){
+        const health=await response.json();
+        if(health.service==='video-inbox'){location.reload();return;}
+      }
+    }catch{}
+    await new Promise(resolve=>setTimeout(resolve,1200));
+  }
+  throw Error('服务没有在预期时间内回来。请双击桌面的「视频收件箱」重新启动，再刷新本页。');
+}
+$('change-data-dir').onclick=async()=>{
+  const button=$('change-data-dir');
+  try{
+    button.disabled=true;$('data-dir-message').hidden=true;
+    const picked=await api('/settings/pick-directory',{});
+    if(!picked.path)return;
+    const preview=await api('/settings/data-dir/preview',{path:picked.path});
+    const ok=confirm('把 '+mb(preview.source_bytes)+' 缓存复制到：\n'+preview.target+'\n\n目标盘剩余 '+(preview.free_bytes/1073741824).toFixed(1)+' GB。\n迁移期间服务会自动重启；原目录保留不删，确认新位置能用后你自己删。\n\n继续吗？');
+    if(!ok)return;
+    const result=await api('/settings/data-dir',{path:picked.path});
+    setDataDirMessage(result.message+'。页面会在十几秒内自动恢复，先别关这个标签页…',false);
+    await waitForRestart();
+  }catch(e){setDataDirMessage(e.message,true);}
+  finally{button.disabled=false;}
+};
+$('reset-data-dir').onclick=async()=>{
+  if(!confirm('切回默认位置？\n\n只切换「读取哪个文件夹」，不会移动或删除任何文件；自定义目录里已有的缓存会留在原处。'))return;
+  try{
+    const result=await api('/settings/data-dir/reset',{});
+    setDataDirMessage(result.message+'。页面会在十几秒内自动恢复…',false);
+    await waitForRestart();
+  }catch(e){setDataDirMessage(e.message,true);}
+};
 $('storage-button').onclick=()=>openStorage().catch(e=>toast(e.message));
 $('clean-job').onclick=()=>openStorage(state.job.id).catch(e=>toast(e.message));
 function openDeleteJob(id){

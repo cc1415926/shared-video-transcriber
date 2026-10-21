@@ -18,8 +18,10 @@ from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from library import Library
-from local_media import pick_file, original_path
-from runtime_paths import executable, prepare_runtime, resource_dir, user_data_dir
+from local_media import pick_file, pick_directory, original_path
+from restart import schedule_restart
+from runtime_paths import (data_dir_state, default_data_dir, executable, prepare_runtime,
+                           read_bootstrap, resource_dir, user_data_dir, write_bootstrap)
 from version import __version__
 
 BASE = resource_dir()
@@ -106,15 +108,6 @@ class LocalJobInput(BaseModel):
     cleanup_after: bool = False
     reference_url: str = Field(default='',max_length=2000)
     context_notes: str = Field(default='',max_length=8000)
-
-
-class WechatChannelsImportInput(LocalJobInput):
-    work_id: str = Field(default='', max_length=500)
-    title: str = Field(default='', max_length=1000)
-    author: str = Field(default='', max_length=500)
-    original_caption: str = Field(default='', max_length=8000)
-    hashtags: list[str] = Field(default_factory=list, max_length=100)
-    source_url: str = Field(default='', max_length=2000)
 
 
 class SegmentChange(BaseModel):
@@ -206,27 +199,14 @@ def choose_local_file():
     return pick_file()
 
 
+@app.post('/api/local/pick-directory')
+def choose_local_directory():
+    return pick_directory()
+
+
 @app.post('/api/local/jobs',status_code=202)
 def create_local_job(body: LocalJobInput, request: Request):
     return request.app.state.library.submit_local(**body.model_dump())
-
-
-@app.post('/api/channels/local/jobs', status_code=202)
-def create_wechat_channels_job(body: WechatChannelsImportInput, request: Request):
-    """Import a completed, user-selected Channels download without copying it."""
-    values = body.model_dump()
-    metadata = {
-        'work_id': values.pop('work_id').strip(),
-        'title': values.pop('title').strip(),
-        'author': values.pop('author').strip(),
-        'original_caption': values.pop('original_caption').strip(),
-        'hashtags': [item.strip() for item in values.pop('hashtags') if item.strip()],
-    }
-    source_url = values.pop('source_url').strip()
-    if source_url:
-        values['reference_url'] = source_url
-    return request.app.state.library.submit_local(**values, source_platform='wechat_channels',
-                                                   source_metadata=metadata)
 
 
 @app.get('/api/jobs/{jid}/original')
@@ -344,6 +324,120 @@ def save_spoken_script(jid: str, body: SpokenScriptInput, request: Request):
 @app.get('/api/storage')
 def storage(request: Request):
     return request.app.state.library.storage_stats()
+
+
+def _dir_size(path: Path) -> int:
+    total = 0
+    try:
+        for item in path.rglob('*'):
+            try:
+                if item.is_file() and not item.is_symlink():
+                    total += item.stat().st_size
+            except OSError:
+                continue
+    except OSError:
+        return total
+    return total
+
+
+def _validate_data_dir(raw: str, library) -> dict:
+    """只做校验，不落盘。迁移与预览共用同一套规则。"""
+    text = (raw or '').strip().strip('"')
+    if not text:
+        raise HTTPException(400, '请先选择一个新的文件夹')
+    target = Path(text).expanduser()
+    if not target.is_absolute():
+        raise HTTPException(400, '请提供完整的绝对路径')
+    try:
+        target = target.resolve()
+    except OSError as exc:
+        raise HTTPException(400, f'这个路径不可用：{exc}') from exc
+    current = Path(library.root).resolve()
+    if target == current:
+        raise HTTPException(400, '新位置和当前位置是同一个文件夹')
+    if target.is_file():
+        raise HTTPException(400, '这个路径是个文件，请选择文件夹')
+    if target.is_relative_to(current) or current.is_relative_to(target):
+        raise HTTPException(400, '新位置不能和当前缓存目录互相嵌套')
+    if target.is_relative_to(Path(BASE).resolve()):
+        raise HTTPException(400, '不能把缓存放进程序目录，程序更新时会覆盖它')
+    busy = [jid for jid in library.jobs if library.busy(jid)]
+    if busy:
+        raise HTTPException(409, f'还有 {len(busy)} 个任务在处理，等它们结束再搬')
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        probe = target / '.video-inbox-write-test'
+        probe.write_text('ok', encoding='utf-8')
+        probe.unlink()
+    except OSError as exc:
+        raise HTTPException(400, f'这个文件夹不可写：{exc}') from exc
+    source_bytes = _dir_size(current)
+    free = shutil.disk_usage(target).free
+    needed = int(source_bytes * 1.05) + 209715200
+    if free < needed:
+        raise HTTPException(400, f'目标磁盘空间不够：需要约 {needed / 1048576:.0f} MB，可用 {free / 1048576:.0f} MB')
+    return {'target': target, 'source': current, 'source_bytes': source_bytes,
+            'free_bytes': free, 'needed_bytes': needed}
+
+
+class DataDirInput(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
+@app.get('/api/settings/data-dir')
+def data_dir_info(request: Request):
+    state = data_dir_state()
+    state['bytes'] = _dir_size(Path(state['data_dir']))
+    last = read_bootstrap().get('last_migration')
+    state['last_migration'] = last if isinstance(last, dict) else None
+    return state
+
+
+@app.post('/api/settings/pick-directory')
+def pick_data_dir():
+    return pick_directory('选择视频收件箱的文件存放位置')
+
+
+@app.post('/api/settings/data-dir/preview')
+def preview_data_dir(body: DataDirInput, request: Request):
+    info = _validate_data_dir(body.path, request.app.state.library)
+    return {'target': str(info['target']), 'source': str(info['source']),
+            'source_bytes': info['source_bytes'], 'free_bytes': info['free_bytes'],
+            'needed_bytes': info['needed_bytes']}
+
+
+@app.post('/api/settings/data-dir')
+def set_data_dir(body: DataDirInput, request: Request):
+    """记录迁移意图并重启；真正的复制发生在下次启动的最早期。
+
+    复制放在重启之后是因为：数据库和媒体文件此时全被旧进程占用，
+    带着连接复制只会得到一份坏库。先退出再复制，失败也不会丢原目录。
+    """
+    info = _validate_data_dir(body.path, request.app.state.library)
+    settings = read_bootstrap()
+    settings['pending_migration'] = {'from': str(info['source']), 'to': str(info['target'])}
+    write_bootstrap(settings)
+    schedule_restart()
+    return {'restart': True, 'target': str(info['target']), 'bytes': info['source_bytes'],
+            'message': f'正在把 {info["source_bytes"] / 1048576:.0f} MB 缓存搬到新位置，服务会自动重启'}
+
+
+@app.post('/api/settings/data-dir/reset')
+def reset_data_dir(request: Request):
+    """只切回默认位置，不移动任何文件。"""
+    settings = read_bootstrap()
+    settings.pop('data_dir', None)
+    settings.pop('pending_migration', None)
+    write_bootstrap(settings)
+    schedule_restart()
+    return {'restart': True, 'target': str(default_data_dir()),
+            'message': '已切回默认位置，只切换读取路径，不会移动已有文件'}
+
+
+@app.post('/api/settings/restart')
+def restart_service():
+    schedule_restart()
+    return {'restart': True, 'message': '服务正在重启'}
 
 
 @app.post('/api/storage/preview')

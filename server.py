@@ -25,6 +25,7 @@ import re
 import shutil
 import ssl
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -57,7 +58,17 @@ _MOBILE_UA = (
     "AppleWebKit/605.1.15 (KHTML, like Gecko) "
     "Version/16.0 Mobile/15E148 Safari/604.1"
 )
-_SSL_CTX = ssl.create_default_context()
+def _trusted_ssl_context():
+    """Use the bundled CA store in a frozen app without weakening TLS checks."""
+    if getattr(sys, 'frozen', False) and not os.environ.get('SSL_CERT_FILE'):
+        import certifi
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.load_verify_locations(cafile=certifi.where())
+        return context
+    return ssl.create_default_context()
+
+
+_SSL_CTX = _trusted_ssl_context()
 
 # 下载和转录分开排队：长视频转录很慢，不能阻塞普通下载任务。
 _DOWNLOAD_EXECUTOR = ThreadPoolExecutor(max_workers=3)

@@ -317,13 +317,6 @@ class Library(StorageMixin):
         md = f"# {job['title']}\n\n来源：{job['url']}\n\n"
         if job.get('local_source'):
             md += '本地来源：' + job['local_source']['name'] + '（原文件只读引用，不包含在导出包中）\n\n'
-        if job.get('platform') == 'wechat_channels':
-            metadata = job.get('source_metadata') or {}
-            md += ('## 微信视频号原始元数据\n\n'
-                   f"作品 ID：{metadata.get('work_id') or '未获取'}\n\n"
-                   f"作者：{metadata.get('author') or '未获取'}\n\n"
-                   f"原始发布文案：{metadata.get('original_caption') or '未获取'}\n\n"
-                   f"话题标签：{'、'.join(metadata.get('hashtags') or []) or '未获取'}\n\n")
         if job.get('spoken_script'):
             md += '## 人工口播稿（纯文本）\n\n' + job['spoken_script'] + '\n\n'
         if job.get('rewrite_script'):

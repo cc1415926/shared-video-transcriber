@@ -20,6 +20,22 @@ def simplified(text):
     return _CONVERTER.convert(text)
 
 
+def _set_hf_offline_if_cached(model_size):
+    """模型已完整缓存时切换 HF 离线模式，跳过 snapshot_download 的联网版本核对。
+
+    huggingface_hub 即使缓存命中也会发一次在线 HEAD 请求；代理对该请求返回
+    502 时整次加载直接失败，缓存完全不被利用。必须在首次 import huggingface_hub
+    之前设置（其常量在导入时读取）。
+    """
+    if 'HF_HUB_OFFLINE' in os.environ:
+        return
+    from pathlib import Path
+    hf_home = os.environ.get('HF_HOME') or str(Path.home() / '.cache' / 'huggingface')
+    snapshot = Path(hf_home) / 'hub' / f'models--Systran--faster-whisper-{model_size}' / 'snapshots'
+    if any(snapshot.glob('*/model.bin')):
+        os.environ['HF_HUB_OFFLINE'] = '1'
+
+
 def transcribe(path, model_size='small', language=None, hotwords='', on_segment=None, on_status=None, cancelled=None):
     global _MODEL, _KEY
     if model_size not in MODELS:
@@ -36,6 +52,7 @@ def transcribe(path, model_size='small', language=None, hotwords='', on_segment=
         key = (model_size, device, compute)
         if key != _KEY:
             notify('加载语音模型（首次使用可能需要下载）')
+            _set_hf_offline_if_cached(model_size)
             from faster_whisper import WhisperModel
             _MODEL = None
             _KEY = None

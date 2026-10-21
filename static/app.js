@@ -6,15 +6,23 @@ const state = {token:'',health:null,jobs:[],selected:/^[a-f0-9]{32}$/.test(reque
 const fmt = sec => {const n=Math.max(0,Math.floor(sec||0));return (n>=3600?Math.floor(n/3600)+':':'')+String(Math.floor(n/60)%60).padStart(2,'0')+':'+String(n%60).padStart(2,'0');};
 const mb = n => ((n||0)/1048576).toFixed(1)+' MB';
 const labels = {done:'已完成',running:'处理中',queued:'排队中',cancelling:'正在停止',cancelled:'已取消',error:'失败',interrupted:'已中断'};
-const platformLabel = value => ({douyin:'抖音',bilibili:'Bilibili',youtube:'YouTube',tiktok:'TikTok',local:'本地文件',wechat_channels:'微信视频号'}[value]||value);
+const platformLabel = value => ({douyin:'抖音',bilibili:'Bilibili',youtube:'YouTube',tiktok:'TikTok',local:'本地文件'}[value]||value);
 function node(tag,text,className){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(className)el.className=className;return el;}
 function visible(id,show){$(id).hidden=!show;}
 function showPage(page){state.page=page;visible('home',page==='home');document.querySelector('.composer').hidden=page!=='workspace';visible('result',page==='workspace'&&!!state.job);document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));if(page==='workspace')$('composer-title').scrollIntoView({block:'start',behavior:'smooth'});}
 function startNewTask(){state.selected=null;state.job=null;state.lastRender='';localStorage.removeItem('video.selected');showPage('workspace');visible('result',false);$('url').value='';$('url').focus();window.scrollTo({top:0,behavior:'smooth'});}
 function toast(text){$('toast').textContent=text;visible('toast',true);clearTimeout(toast.timer);toast.timer=setTimeout(()=>visible('toast',false),3200);}
 async function api(path,body){
-  const response=await fetch('/api'+path,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json','X-Video-Token':state.token},body:body===undefined?undefined:JSON.stringify(body)});
-  const data=await response.json();
+  let response;
+  try{
+    response=await fetch('/api'+path,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json','X-Video-Token':state.token},body:body===undefined?undefined:JSON.stringify(body)});
+  }catch{
+    // fetch 在网络层就失败时只会抛 TypeError「Failed to fetch」，对用户没有意义。
+    throw new Error('连不上本地服务：服务可能已经停止（启动窗口被关掉）。请双击「视频收件箱」重新启动，再刷新本页。');
+  }
+  let data;
+  try{data=await response.json();}
+  catch{throw new Error('本地服务返回了无法识别的内容，请重启服务后重试。');}
   if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:'输入不符合要求，请检查链接和选项。');
   return data;
 }
@@ -141,10 +149,6 @@ function render(){
   }
   visible('job-error',!!job.error);$('job-error').textContent=job.error||'';
   $('warnings').replaceChildren(...job.warnings.map(w=>node('p',w)));
-  const metadata=job.source_metadata||{};
-  const isChannels=job.platform==='wechat_channels';
-  visible('channels-source-panel',isChannels);
-  if(isChannels)$('channels-source-text').textContent=['作品 ID：'+(metadata.work_id||'未获取'),'作者：'+(metadata.author||'未获取'),'原始发布文案：'+(metadata.original_caption||'未获取'),'话题标签：'+((metadata.hashtags||[]).join('、')||'未获取')].join('\n');
   const key=JSON.stringify([job.id,job.status,job.segments,job.frames,job.summary,job.summary_status,job.summary_error,job.rewrite_script,job.rewrite_status,job.assets,job.clips,job.revision,job.media_cleaned,job.cache_cleaned,job.media_available,job.local_video_available]);
   if(key!==state.lastRender){state.lastRender=key;renderContent();}
   renderClips();

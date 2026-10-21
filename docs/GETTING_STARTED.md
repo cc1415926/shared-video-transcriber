@@ -8,6 +8,12 @@ Windows 双击 run_web.bat；macOS/Linux 在解压目录执行 bash run_web.sh�
 首次选用某个语音档位时还会下载模型；“加载语音模型”不是已开始识别。
 网页地址会显示在窗口中，通常为 http://127.0.0.1:7860，端口被占用时自动选择后续端口。
 
+Windows 首次安装成功后，如需桌面入口与可选登录自启动，可运行：
+
+    powershell -File scripts\\install_autostart.ps1
+
+桌面入口会等待服务健康检查通过，并自动打开实际使用的 7860–7879 端口。停止服务运行 `powershell -File scripts\\stop_service.ps1`；取消登录自启动运行 `powershell -File scripts\\uninstall_autostart.ps1`。后台启动失败时查看数据目录下的 `logs\\launcher.log`，或直接双击 `run_web.bat` 查看即时错误。
+
 ## 日常怎么选
 
 朋友发口播视频：粘贴整段分享文字 → 只读文字 → 开始处理。

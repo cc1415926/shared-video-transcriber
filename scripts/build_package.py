@@ -5,6 +5,7 @@ import argparse
 import os
 import platform
 import shutil
+import ssl
 import subprocess
 import sys
 from pathlib import Path
@@ -41,6 +42,11 @@ def build() -> Path:
         '--collect-all', 'playwright', '--collect-submodules', 'mcp.server', '--collect-all', 'yt_dlp',
         '--hidden-import', 'opencc', '--hidden-import', 'app', '--hidden-import', 'server', '--hidden-import', 'webapp',
     ]
+    rejected_cas = Path(ssl.__file__).with_name('codex-rejected-cas.pem')
+    if rejected_cas.is_file():
+        # The bundled Codex Python hardens SSLContext by loading this file from
+        # beside ssl.py. PyInstaller does not discover that dynamic path.
+        command += ['--add-data', f'{rejected_cas}{separator}.']
     for package in ('fastapi', 'uvicorn', 'faster-whisper', 'ctranslate2', 'av', 'playwright', 'yt-dlp', 'mcp', 'pillow', 'python-dotenv', 'httpx'):
         command += ['--copy-metadata', package]
     command.append(str(ROOT / 'launcher.py'))

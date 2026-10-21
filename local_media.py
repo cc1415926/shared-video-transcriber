@@ -74,6 +74,28 @@ root.destroy();print(json.dumps({'path':path},ensure_ascii=True))
         _PICKER_LOCK.release()
 
 
+def pick_directory(title='选择文件夹'):
+    if not _PICKER_LOCK.acquire(blocking=False):
+        raise ValueError('文件选择窗口已经打开，请先完成选择')
+    label = json.dumps(str(title), ensure_ascii=True)
+    script = f"""import json,tkinter as tk
+from tkinter import filedialog
+root=tk.Tk();root.withdraw();root.attributes('-topmost',True)
+path=filedialog.askdirectory(title={label},mustexist=True)
+root.destroy();print(json.dumps({{'path':path}},ensure_ascii=True))
+"""
+    try:
+        result=subprocess.run([sys.executable,'-c',script],capture_output=True,text=True,timeout=180,
+                              creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0) if os.name=='nt' else 0)
+        if result.returncode:
+            raise ValueError('无法打开文件夹选择窗口，请手动粘贴完整路径')
+        return json.loads(result.stdout)
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError('文件夹选择超时，请重试或直接粘贴完整路径') from exc
+    finally:
+        _PICKER_LOCK.release()
+
+
 def save_video_copy(source, suggested_name):
     """Open a native Save As dialog only after the user explicitly clicks save."""
     source = Path(source).resolve(strict=True)

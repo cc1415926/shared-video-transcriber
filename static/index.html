@@ -30,7 +30,7 @@
   <section class="composer" aria-labelledby="composer-title">
     <div class="composer-heading"><div><h1 id="composer-title">链接发来了。先看看讲了什么。</h1><p>粘贴抖音、Bilibili、YouTube 或 TikTok 链接，也可直接粘贴整段分享文字。</p></div><span class="platforms">抖音 / Bilibili / YouTube / TikTok</span></div>
     <form id="job-form">
-      <div class="source-switch" role="group" aria-label="视频来源"><button id="source-online" type="button" class="source-active" aria-pressed="true">分享链接</button><button id="source-local" type="button" aria-pressed="false">电脑里的视频</button><button id="source-channels" type="button" aria-pressed="false">微信视频号</button></div>
+      <div class="source-switch" role="group" aria-label="视频来源"><button id="source-online" type="button" class="source-active" aria-pressed="true">分享链接</button><button id="source-local" type="button" aria-pressed="false">电脑里的视频</button></div>
       <div id="online-input">
       <label for="url" class="sr-only">视频链接或分享文字</label>
       <textarea id="url" rows="2" required maxlength="8000" placeholder="把朋友发来的链接粘贴在这里…" spellcheck="false"></textarea>
@@ -45,15 +45,6 @@
           <label class="text-file-label">读取 TXT 摘要<input id="local-notes-file" type="file" accept=".txt,text/plain"></label>
         </details>
       </div>
-      <details id="channels-metadata" class="local-reference" hidden><summary>视频号元数据（可选；未填写会标记为未获取）</summary>
-        <label>作品 ID<input id="channels-work-id" maxlength="500" placeholder="下载器实际返回时再填写"></label>
-        <label>标题<input id="channels-title" maxlength="1000" placeholder="未获取可留空"></label>
-        <label>作者<input id="channels-author" maxlength="500" placeholder="未获取可留空"></label>
-        <label>原始发布文案<textarea id="channels-caption" rows="4" maxlength="8000" placeholder="与自动口播逐字稿分开保存；未获取可留空"></textarea></label>
-        <label>话题标签<input id="channels-tags" maxlength="2000" placeholder="多个标签用逗号分隔"></label>
-        <label>作品链接<input id="channels-url" maxlength="2000" placeholder="实际可获取时再填写"></label>
-      </details>
-      <p id="channels-collector-status" class="local-source-note" hidden role="status"></p>
       <div class="controls">
         <fieldset class="mode-switch"><legend class="sr-only">处理方式</legend>
           <label><input type="radio" name="mode" value="transcript" checked><span>只读文字</span></label>
@@ -82,7 +73,6 @@
     </section>
     <div id="job-error" class="error" role="alert" hidden></div>
     <div id="warnings" class="warnings"></div>
-    <details id="channels-source-panel" class="reference-note-panel" hidden><summary>微信视频号原始元数据</summary><p id="channels-source-text"></p></details>
     <details id="reference-note-panel" class="reference-note-panel" hidden><summary>已附参考摘要（不是逐字稿，未经录音核验）</summary><p id="reference-note-text"></p></details>
     <div class="reader-toolbar"><div class="tabs" role="tablist" aria-label="阅读视图">
       <button id="tab-overview" role="tab" aria-controls="overview" aria-selected="true" data-tab="overview">速览</button>
@@ -129,7 +119,19 @@ VIDEO_AI_API_KEY=你的密钥</pre><p>也可复制项目的 .env.example 为 .en
 <dialog id="clip-dialog" class="wide-dialog"><div class="dialog-heading"><h2>截取视频片段</h2><button class="close-dialog" aria-label="关闭">×</button></div><p class="muted">拖动起点或终点时，下方会分别显示对应帧。原视频不会被改写；精准导出会重新编码 MP4，极速无损导出会受关键帧影响。</p><div class="clip-frame-previews"><figure><video id="clip-start-frame" muted playsinline preload="metadata"></video><figcaption>起点帧 <output id="clip-start-frame-time">00:00</output></figcaption></figure><figure><video id="clip-end-frame" muted playsinline preload="metadata"></video><figcaption>终点帧 <output id="clip-end-frame-time">00:00</output></figcaption></figure></div><video id="clip-preview-player" controls preload="metadata" playsinline></video><div class="clip-timeline"><div class="clip-range"><input id="clip-start" type="range" min="0" step="0.01"><input id="clip-end" type="range" min="0" step="0.01"></div><div class="clip-values"><label>开始（秒）<input id="clip-start-input" type="number" min="0" step="0.01"></label><label>结束（秒）<input id="clip-end-input" type="number" min="0" step="0.01"></label><output id="clip-duration"></output></div><div class="copy-actions"><button id="clip-set-start" class="secondary">当前播放位置设为起点</button><button id="clip-set-end" class="secondary">当前播放位置设为终点</button><button id="clip-preview" class="secondary">播放选中片段</button></div></div><div class="copy-controls"><label>导出方式<select id="clip-mode"><option value="precise">精准导出 MP4（推荐）</option><option value="copy">极速无损导出（关键帧可能不准）</option></select></label></div><p id="clip-error" class="error" hidden></p><div class="copy-actions"><button id="clip-export" class="primary">导出片段</button></div><div id="clip-results" class="clip-results"></div></dialog>
 <dialog id="delete-job-dialog"><div class="dialog-heading"><h2>删除这条生成记录？</h2><button class="close-dialog" aria-label="关闭">×</button></div><p>将永久删除本工具保存的逐字稿、人工口播稿、字幕、导出文件和缓存媒体，无法在应用内恢复。</p><p>如果这是“电脑里的视频”，你的原始视频文件不会被删除。</p><button id="confirm-delete-job" class="danger">永久删除</button></dialog>
 <dialog id="recognize-dialog"><div class="dialog-heading"><h2>再听一遍</h2><button class="close-dialog" aria-label="关闭">×</button></div><p class="muted">优先复用已下载的音频。新建一份识别结果，旧稿仍留在历史中，方便对照。</p><div class="advanced"><label>识别档位<select id="redo-profile"><option value="balanced">细致 small</option><option value="accurate">精细 medium（更慢）</option><option value="fast">快速 base</option></select></label><label>语言<select id="redo-language"><option value="">自动</option><option value="zh">中文</option><option value="en">英语</option><option value="ja">日语</option><option value="ko">韩语</option></select></label><label>这段视频中的专业词 / 自造词<input id="redo-terms" maxlength="500" placeholder="例如：光粒级、当量分级、Hopf"></label></div><p id="redo-note" class="muted"></p><button id="confirm-redo" class="primary">开始重新识别</button></dialog>
-<dialog id="storage-dialog" class="wide-dialog"><div class="dialog-heading"><h2>把空间腾出来</h2><button class="close-dialog" aria-label="关闭">×</button></div><p id="storage-total"></p>
+<dialog id="storage-dialog" class="wide-dialog"><div class="dialog-heading"><h2>把空间腾出来</h2><button class="close-dialog" aria-label="关闭">×</button></div>
+  <div class="path-card">
+    <div class="path-head"><h3>文件存放位置</h3><span id="data-dir-badge" class="path-badge" hidden>已自定义</span></div>
+    <p class="muted">采集的视频、音频、截图和历史记录都放在这里。换位置会把整份缓存复制过去，原目录保留不删，确认新位置能用后你自己删。</p>
+    <code id="data-dir-path">读取中…</code>
+    <p id="data-dir-meta" class="muted"></p>
+    <div class="copy-actions">
+      <button id="change-data-dir" class="secondary">选择新位置</button>
+      <button id="reset-data-dir" class="text-button" hidden>恢复默认位置</button>
+    </div>
+    <p id="data-dir-message" role="status" class="path-status" hidden></p>
+  </div>
+  <p id="storage-total"></p>
   <label>清理范围<select id="cleanup-scope"><option value="media">删除音视频，保留文字和截图</option><option value="intermediates">只删中间文件，保留复听和原视频</option><option value="all_media">删除音视频和截图，只留文字资料</option></select></label>
   <label class="check select-all"><input id="storage-select-all" type="checkbox">选择所有可清理任务</label><div id="storage-jobs"></div><button id="preview-cleanup" class="secondary">预览可释放的空间</button>
   <div id="cleanup-preview" hidden><p id="cleanup-description"></p><p class="muted">缓存删除不能在应用内撤销。文字、修订和历史保留，本地导入的原文件不会删除。处理、生成摘要或用于重识别的任务会被跳过；其他窗口占用的媒体可能暂时无法删除。</p><button id="confirm-cleanup" class="danger">确认删除这些文件</button></div><p id="storage-message" role="status"></p>

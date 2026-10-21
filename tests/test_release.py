@@ -25,6 +25,19 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn('--trusted-host',windows+macos)
         self.assertIn('pywin32==312 ; sys_platform == \'win32\'',lock)
 
+    def test_powershell_scripts_with_non_ascii_keep_utf8_bom(self):
+        # Windows PowerShell 5.1 在文件没有 BOM 时按系统 ANSI（简体中文为 GBK）解码 .ps1，
+        # 中文提示会变成乱码并破坏引号配对，脚本直接语法报错、启动器一闪而过。
+        root=Path(__file__).resolve().parents[1]
+        skipped={'.venv','build','dist','node_modules','.git'}
+        for path in sorted(root.rglob('*.ps1')):
+            if skipped & set(path.relative_to(root).parts):
+                continue
+            data=path.read_bytes()
+            if all(byte < 0x80 for byte in data):
+                continue
+            self.assertTrue(data.startswith(b'\xef\xbb\xbf'),f'{path.relative_to(root)} 含非 ASCII 字符但缺少 UTF-8 BOM')
+
     def test_env_file_preserves_explicit_environment_and_literal_values(self):
         with tempfile.TemporaryDirectory() as root,patch.dict(os.environ,{'VIDEO_AI_API_KEY':'existing'}):
             (Path(root)/'.env').write_text('VIDEO_AI_API_KEY=from-file\nVIDEO_RELEASE_TEST=literal$dollar\n',encoding='utf-8')
@@ -48,6 +61,39 @@ class ReleaseTests(unittest.TestCase):
             with setup_lock(Path(root)):
                 with self.assertRaises(RuntimeError):
                     with setup_lock(Path(root)):pass
+
+    def test_removed_platform_has_no_code_or_dependency_references(self):
+        root=Path(__file__).resolve().parents[1]
+        excluded={'.git','.venv','.data','__pycache__','build','dist'}
+        needles=('wechat_'+'channels','wx-'+'downloader','wx_'+'downloader',
+                 'channels_'+'collector','weixin.qq.com/'+'sph')
+        hits=[]
+        for path in root.rglob('*'):
+            if path.resolve() == Path(__file__).resolve():
+                continue
+            if not path.is_file() or excluded & set(path.relative_to(root).parts):
+                continue
+            if path.suffix.lower() not in {'.py','.js','.html','.css','.md','.txt','.lock','.ps1','.vbs','.bat','.sh'}:
+                continue
+            text=path.read_text(encoding='utf-8-sig',errors='ignore').lower()
+            if any(needle in text for needle in needles):
+                hits.append(str(path.relative_to(root)))
+        self.assertEqual(hits,[])
+
+    def test_windows_desktop_launcher_waits_for_actual_healthy_port(self):
+        root=Path(__file__).resolve().parents[1]
+        launcher=(root/'scripts/open_app.vbs').read_text(encoding='utf-8-sig')
+        self.assertIn('For port = 7860 To 7879',launcher)
+        self.assertIn('/api/health',launcher)
+        self.assertIn('launcher.py',launcher)
+        self.assertIn('launcher.log',launcher)
+        self.assertNotIn('WScript.Sleep 9000',launcher)
+
+    def test_packager_preserves_runtime_rejected_ca_policy(self):
+        root=Path(__file__).resolve().parents[1]
+        script=(root/'scripts/build_package.py').read_text(encoding='utf-8')
+        self.assertIn('codex-rejected-cas.pem',script)
+        self.assertIn("command += ['--add-data'",script)
 
     def test_private_files_cannot_enter_source_package(self):
         with tempfile.TemporaryDirectory() as root:

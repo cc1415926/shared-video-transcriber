@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import ssl
 import io
 import wave
@@ -32,6 +33,14 @@ class UrlTests(unittest.TestCase):
 
     def test_tls_enabled(self):
         self.assertTrue(server._SSL_CTX.check_hostname)
+
+    def test_frozen_tls_uses_packaged_ca_bundle(self):
+        with patch.object(server.sys,'frozen',True,create=True),patch.dict(os.environ,{},clear=False), \
+                patch('certifi.where',return_value='bundled-ca.pem'),patch('ssl.SSLContext') as context_type:
+            os.environ.pop('SSL_CERT_FILE',None)
+            context=server._trusted_ssl_context()
+            context_type.assert_called_once_with(ssl.PROTOCOL_TLS_CLIENT)
+            context.load_verify_locations.assert_called_once_with(cafile='bundled-ca.pem')
         self.assertEqual(server._SSL_CTX.verify_mode, ssl.CERT_REQUIRED)
 
     def test_part_selects_correct_cid(self):
