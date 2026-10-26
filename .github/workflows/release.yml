@@ -15,6 +15,14 @@ permissions:
 
 env:
   PYTHON_VERSION: '3.12'
+  WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+  WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+  MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+  MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+  MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+  MACOS_NOTARY_KEY_BASE64: ${{ secrets.MACOS_NOTARY_KEY_BASE64 }}
+  MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+  MACOS_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
 
 jobs:
   windows:
@@ -52,7 +60,7 @@ jobs:
         shell: pwsh
         run: ./scripts/build_windows_installer.ps1
       - name: Optional Windows signing
-        if: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' && secrets.WINDOWS_CERT_PASSWORD != '' }}
+        if: ${{ env.WINDOWS_CERT_PFX_BASE64 != '' && env.WINDOWS_CERT_PASSWORD != '' }}
         shell: pwsh
         env:
           WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
@@ -101,7 +109,7 @@ jobs:
       - name: Build application bundle
         run: python scripts/build_package.py
       - name: Optional Developer ID signing
-        if: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' && secrets.MACOS_CERTIFICATE_PASSWORD != '' && secrets.MACOS_SIGNING_IDENTITY != '' }}
+        if: ${{ env.MACOS_CERTIFICATE_P12_BASE64 != '' && env.MACOS_CERTIFICATE_PASSWORD != '' && env.MACOS_SIGNING_IDENTITY != '' }}
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -122,7 +130,7 @@ jobs:
           VIDEO_INBOX_UNSIGNED_TEST: ${{ (secrets.MACOS_CERTIFICATE_P12_BASE64 == '' || secrets.MACOS_CERTIFICATE_PASSWORD == '' || secrets.MACOS_SIGNING_IDENTITY == '') && '1' || '0' }}
         run: bash scripts/create_dmg.sh
       - name: Optional notarization and stapling
-        if: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' && secrets.MACOS_CERTIFICATE_PASSWORD != '' && secrets.MACOS_SIGNING_IDENTITY != '' && secrets.MACOS_NOTARY_KEY_BASE64 != '' && secrets.MACOS_NOTARY_KEY_ID != '' && secrets.MACOS_NOTARY_ISSUER != '' }}
+        if: ${{ env.MACOS_CERTIFICATE_P12_BASE64 != '' && env.MACOS_CERTIFICATE_PASSWORD != '' && env.MACOS_SIGNING_IDENTITY != '' && env.MACOS_NOTARY_KEY_BASE64 != '' && env.MACOS_NOTARY_KEY_ID != '' && env.MACOS_NOTARY_ISSUER != '' }}
         env:
           MACOS_NOTARY_KEY_BASE64: ${{ secrets.MACOS_NOTARY_KEY_BASE64 }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
