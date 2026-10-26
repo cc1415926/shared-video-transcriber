@@ -72,10 +72,14 @@ class DataDirTests(unittest.TestCase):
 
     def test_unreachable_configured_directory_falls_back_to_default(self):
         self.write_settings({'data_dir': str(Path(self.temp.name) / 'unplugged-drive' / 'data')})
+        fallback = Path(self.temp.name) / 'fallback'
+        fallback.mkdir()
         with patch.object(runtime_paths, 'resource_dir', return_value=Path(self.temp.name) / 'app'), \
-                patch.object(runtime_paths, 'default_data_dir', return_value=Path(self.temp.name) / 'fallback'), \
+                patch.object(runtime_paths, 'default_data_dir', return_value=fallback), \
                 patch.dict(os.environ, {'VIDEO_DATA_DIR': ''}):
-            self.assertEqual(runtime_paths.user_data_dir(), (Path(self.temp.name) / 'fallback').resolve())
+            # GitHub's Windows runner may spell the same temporary directory
+            # with a DOS 8.3 short path. Compare filesystem identity, not text.
+            self.assertTrue(os.path.samefile(runtime_paths.user_data_dir(), fallback))
 
 
 if __name__ == '__main__':
