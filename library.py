@@ -143,7 +143,7 @@ class Library(StorageMixin):
             ordered = sorted(self.jobs.values(), key=lambda item: item['created'], reverse=True)[:200]
             return [{key: job.get(key) for key in ('id', 'title', 'platform', 'status', 'stage', 'created', 'mode', 'duration','profile','model','source_job','revision','rewrite_status')} for job in ordered]
 
-    def submit_local(self, path, profile='balanced', mode='visual', language=None, hotwords='', force=False,
+    def submit_local(self, path, profile='accurate', mode='visual', language=None, hotwords='', force=False,
                      cleanup_after=False, reference_url='', context_notes='', source_platform='local',
                      source_metadata=None):
         source=inspect_media(path)
@@ -155,7 +155,7 @@ class Library(StorageMixin):
                            _local_source=source,context_notes=context_notes,
                            _source_platform=source_platform, _source_metadata=source_metadata or {})
 
-    def submit(self, url, profile='balanced', mode='transcript', language=None, hotwords='', force=False, cleanup_after=False, source_job=None, _local_source=None, context_notes='', _source_platform=None, _source_metadata=None):
+    def submit(self, url, profile='accurate', mode='transcript', language=None, hotwords='', force=False, cleanup_after=False, source_job=None, _local_source=None, context_notes='', _source_platform=None, _source_metadata=None):
         url = media._extract_url(url) if url or not _local_source else ''
         if profile not in PROFILES or mode not in {'transcript', 'visual', 'download'}:
             raise ValueError('未知的处理方式')
@@ -354,7 +354,7 @@ class Library(StorageMixin):
             self.update(jid,assets=list(dict.fromkeys(job['assets']+[name])))
             return name
 
-    def rerecognize(self, jid, profile='balanced', language=None, hotwords=''):
+    def rerecognize(self, jid, profile='accurate', language=None, hotwords=''):
         with self.lock:
             job = self.get(jid)
             return self.submit(job['url'],profile,'transcript',language,hotwords,True,source_job=jid,

@@ -15,7 +15,17 @@
 
 脚本使用固定版本的 `uv` 与 [requirements.lock](requirements.lock) 建立项目专属 `.venv`，复用已有 Python/uv 缓存、Chrome/Edge/Chromium 和 FFmpeg。缺少浏览器时才下载 Playwright Chromium；faster-whisper 模型不在安装时下载，而在首次选用识别档位时按需下载。服务只监听本机 `127.0.0.1`，启动后终端会显示实际地址（通常为 http://127.0.0.1:7860）。
 
-完整提示词、失败恢复、可选 FFmpeg、环境自检和 MCP 配置见 [Agent 部署说明](docs/AGENT_DEPLOYMENT.md)。也可下载 [源码 ZIP](https://github.com/ZY-ZhichaoYu/shared-video-transcriber/archive/refs/heads/main.zip) 后完整解压再执行同一命令；不需要 Git 或 AI key。
+完整提示词、失败恢复、可选 FFmpeg、环境自检和 MCP 配置见 [Agent 部署说明](docs/AGENT_DEPLOYMENT.md)。也可下载 [源码 ZIP](https://github.com/cc1415926/shared-video-transcriber/archive/refs/heads/main.zip) 后完整解压再执行同一命令；不需要 Git 或 AI key。
+
+### 微信视频号采集（Windows，可选）
+
+Windows 一体化安装包内置 `wx_channel` 标准版 v5.7.13；首次在收件箱点击“启动视频号下载”时，Windows 会要求用户确认管理员授权。采集器的证书、登录状态、下载记录和视频都只保存在该 Windows 用户自己的数据目录，绝不打包或复制其他人的资料。便携 ZIP 和源码部署不内置采集器，仍可按下列方式手动配置。
+
+若使用源码版、便携版或另行安装采集器，可在视频收件箱的配置文件中指定其目录：源码运行时复制 `.env.example` 为 `.env`；安装包运行时创建 `%LOCALAPPDATA%\VideoInbox\config\.env`。填写：
+
+    WX_CHANNEL_HOME=C:/Tools/wx_channel
+
+该目录应包含 `wx_channel.exe` 和 `downloads` 文件夹。若程序与下载目录不在同一位置，也可分别设置 `WX_CHANNEL_EXECUTABLE` 与 `WX_CHANNEL_DOWNLOADS_DIR`。保存后重启视频收件箱；网页会显示未配置状态，而不会误用开发者电脑上的路径。
 
 旧的 `run_web.bat` / `run_web.ps1` / `run_web.sh` 仍保留，已转发到同一部署流程。遇到问题可双击 **check_environment.bat**，或在网页“设置”里点击“检查运行环境”。新手说明、常见报错和安全升级方法见 [使用指南](docs/GETTING_STARTED.md)。
 
@@ -36,7 +46,7 @@ Windows 双击 **run_web.bat**。首次会创建虚拟环境、安装依赖和 C
 | 文字 + 视频 | 上述内容、原视频、最多 24 张带时间位置的抽样截图 | 下载更多数据；视频可回看；点击“保存视频”再选择正式保存位置 |
 | 只下载视频 | 当前可访问画质的原视频 | 不运行语音识别 |
 
-默认“细致”使用 small，“快速”使用 base，“精细”使用 medium。较大的模型通常更准确，但不保证每段都更好；CPU 上会更慢。
+默认“精细”使用 medium，“细致”使用 small，“快速”使用 base。较大的模型通常更准确，但不保证每段都更好；CPU 上会更慢。
 更多选项可以指定语言、填写专业名词提示、强制重新处理。
 
 视频会保存到左侧历史。刷新网页不会停止后台任务。进度显示的是**当前阶段**：
@@ -98,7 +108,7 @@ B 站视频依次显示下载画面、下载声音、合并。转录按已识别
 
 需要 64 位 Python 3.10–3.14，推荐 3.12。完整 Bilibili 视频合并需要 ffmpeg；只转录一般不需要单独安装 ffmpeg。
 
-    git clone https://github.com/ZY-ZhichaoYu/shared-video-transcriber.git
+    git clone https://github.com/cc1415926/shared-video-transcriber.git
     cd shared-video-transcriber
     python -m venv .venv
     .venv\Scripts\python.exe -m pip install -r requirements.txt

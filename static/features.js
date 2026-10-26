@@ -138,7 +138,7 @@ function beginInlineEditor(index,row,text){
   input.focus();input.setSelectionRange(input.value.length,input.value.length);
 }
 $('recognize-again').onclick=()=>{
-  const j=state.job;feature.redoJob=j.id;$('redo-profile').value=j.profile==='balanced'?'accurate':'balanced';
+  const j=state.job;feature.redoJob=j.id;$('redo-profile').value='accurate';
   $('redo-language').value=j.language||'';$('redo-terms').value=j.hotwords||'';
   $('redo-note').textContent=j.media_available?'将复用本地音频，新结果会单独保留。':'原音视频已清理，将重新下载；来源失效时可能无法恢复。';
   $('recognize-dialog').showModal();
@@ -237,7 +237,7 @@ $('confirm-delete-job').onclick=async()=>{
   try{
     await api('/jobs/'+id+'/delete',{});
     if(state.selected===id){state.selected=null;state.job=null;localStorage.removeItem('video.selected');}
-    state.jobs=await api('/jobs');renderHistory();visible('result',false);visible('empty',true);
+    state.jobs=await api('/jobs');renderHistory();visible('result',false);visible('empty',false);
     feature.deleteJob=null;$('delete-job-dialog').close();toast('这条生成记录及应用缓存已删除。');
   }catch(e){toast(e.message);}
   finally{$('confirm-delete-job').disabled=false;}

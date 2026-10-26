@@ -6,10 +6,11 @@
   <meta name="color-scheme" content="light">
   <title>视频收件箱 · 把视频变成可以读的内容</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/static/style.css?v=2.2.8">
-  <script src="/static/app.js?v=2.2.8" defer></script>
-  <script src="/static/features.js?v=2.2.8" defer></script>
-  <script src="/static/local.js?v=2.2.8" defer></script>
+  <link rel="stylesheet" href="/static/style.css?v=2.3.3">
+  <script src="/static/app.js?v=2.3.3" defer></script>
+  <script src="/static/features.js?v=2.3.3" defer></script>
+  <script src="/static/local.js?v=2.3.1" defer></script>
+  <script src="/static/wx-channel.js?v=2.3.2" defer></script>
   <script src="/static/diagnostics.js?v=2.3.0" defer></script>
 </head>
 <body>
@@ -25,12 +26,13 @@
   <div class="sidebar-bottom"><span class="local-dot"></span><span id="connection">正在连接本地服务</span><button id="settings-button" aria-label="运行信息与 AI 设置">设置</button></div>
 </aside>
 <main>
-  <header class="topbar"><span>把视频变成可以读的内容</span><div><button id="storage-button" class="text-button">存储与清理</button> <a href="/docs" target="_blank" rel="noopener">API 文档 ↗</a></div></header>
-  <section id="home" class="home-page"><div class="home-hero"><div><p class="eyebrow">VIDEO CONTENT EXTRACTOR</p><h1>把灵感视频，整理成<br>下一条可拍的内容。</h1><p>采集链接、校对口播、分析结构、生成原创改写稿——都留在同一个本地工作台。</p><button id="home-create" class="primary">开始采集视频 <span>↗</span></button></div><div class="hero-steps"><span>01 采集</span><span>02 校对</span><span>03 改写</span></div></div><div class="home-stats"><div><b id="stat-total">0</b><span>全部任务</span></div><div><b id="stat-done">0</b><span>已完成</span></div><div><b id="stat-rewrite">0</b><span>已有 AI 改写</span></div></div></section>
+  <header class="topbar"><div class="workspace-context"><span>视频内容工作台</span><span class="local-processing"><i></i>仅在本机处理</span></div><div><button id="storage-button" class="text-button">存储与清理</button> <a href="/docs" target="_blank" rel="noopener">API 文档 ↗</a></div></header>
+  <section id="home" class="home-page"><div class="home-hero"><div><p class="eyebrow">VIDEO CONTENT EXTRACTOR</p><h1>把灵感视频，整理成<br>下一条可拍的内容。</h1><p>采集链接、校对口播、分析结构、生成原创改写稿——都留在同一个本地工作台。</p><button id="home-create" class="primary">开始采集视频 <span>↗</span></button></div><div class="hero-steps"><span>01 采集</span><span>02 校对</span><span>03 改写</span></div></div><div class="home-stats"><div><b id="stat-total">0</b><span>全部任务</span></div><div><b id="stat-done">0</b><span>已完成</span></div><div><b id="stat-rewrite">0</b><span>已有 AI 改写</span></div></div><section class="home-quick" aria-labelledby="quick-start-title"><div class="home-section-title"><div><h2 id="quick-start-title">从这里开始</h2><p>选择来源，按需处理；所有记录都保留在本机。</p></div></div><div class="quick-source-grid"><button id="home-online" class="quick-source" type="button"><span class="quick-icon">↗</span><strong>粘贴分享链接</strong><small>抖音、B 站、YouTube、TikTok</small></button><button id="home-local" class="quick-source" type="button"><span class="quick-icon">▣</span><strong>导入电脑视频</strong><small>不上传，直接读取原文件</small></button><button id="home-wx" class="quick-source quick-source-featured" type="button"><span class="quick-icon">⌁</span><strong>微信视频号采集</strong><small>下载完成后自动进入收件箱</small></button></div></section></section>
   <section class="composer" aria-labelledby="composer-title">
     <div class="composer-heading"><div><h1 id="composer-title">链接发来了。先看看讲了什么。</h1><p>粘贴抖音、Bilibili、YouTube 或 TikTok 链接，也可直接粘贴整段分享文字。</p></div><span class="platforms">抖音 / Bilibili / YouTube / TikTok</span></div>
+    <ol class="workflow-strip" aria-label="处理流程"><li class="is-current"><b>1</b><span>选择来源</span></li><li><b>2</b><span>精细识别</span></li><li><b>3</b><span>校对与改写</span></li></ol>
     <form id="job-form">
-      <div class="source-switch" role="group" aria-label="视频来源"><button id="source-online" type="button" class="source-active" aria-pressed="true">分享链接</button><button id="source-local" type="button" aria-pressed="false">电脑里的视频</button></div>
+      <div class="source-switch" role="group" aria-label="视频来源"><button id="source-online" type="button" class="source-active" aria-pressed="true">分享链接</button><button id="source-local" type="button" aria-pressed="false">电脑里的视频</button><button id="source-wx-channel" type="button" aria-pressed="false">微信视频号</button></div>
       <div id="online-input">
       <label for="url" class="sr-only">视频链接或分享文字</label>
       <textarea id="url" rows="2" required maxlength="8000" placeholder="把朋友发来的链接粘贴在这里…" spellcheck="false"></textarea>
@@ -45,13 +47,18 @@
           <label class="text-file-label">读取 TXT 摘要<input id="local-notes-file" type="file" accept=".txt,text/plain"></label>
         </details>
       </div>
+      <div id="wx-channel-input" hidden>
+        <div class="wx-inbox-heading"><div class="wx-inbox-copy"><span class="wx-eyebrow">LOCAL COLLECTION</span><strong>微信视频号收件箱</strong><p>下载完成后自动同步到这里；确认内容后再开始文字、画面或 AI 改写处理。</p></div><div class="wx-inbox-actions"><button id="start-wx-channel" type="button" class="primary wx-start-button">启动视频号下载功能</button><button id="refresh-wx-channel" type="button" class="secondary">立即同步</button></div></div>
+        <div id="wx-channel-status" class="local-source-note wx-channel-status">正在读取本机下载目录…</div>
+        <div id="wx-channel-files" class="wx-channel-files" aria-live="polite"></div>
+      </div>
       <div class="controls">
         <fieldset class="mode-switch"><legend class="sr-only">处理方式</legend>
           <label><input type="radio" name="mode" value="transcript" checked><span>只读文字</span></label>
           <label><input type="radio" name="mode" value="visual"><span>文字 + 视频</span></label>
           <label><input type="radio" name="mode" value="download"><span>只下载视频</span></label>
         </fieldset>
-        <label class="profile-label">识别 <select id="profile"><option value="balanced">细致 · 推荐</option><option value="fast">快速 · 较多错字</option><option value="accurate">精细 · 耗时更长</option></select></label>
+        <label class="profile-label">识别 <select id="profile"><option value="accurate" selected>精细 · 默认</option><option value="balanced">细致 · 更快</option><option value="fast">快速 · 较多错字</option></select></label>
         <button type="submit" id="submit" class="primary">开始处理 <span aria-hidden="true">↗</span></button>
       </div>
       <div class="composer-bottom"><span id="mode-hint">优先下载音频，本地识别，不需要 AI 密钥。</span><details><summary>更多选项</summary><div class="advanced"><label>语言<select id="language"><option value="">自动识别</option><option value="zh">中文</option><option value="en">英语</option><option value="ja">日语</option><option value="ko">韩语</option></select></label><label>专有名词提示<input id="hotwords" maxlength="500" placeholder="例如：CIEM、热传导、Brando"></label><label class="check"><input id="force" type="checkbox">重新处理已有结果</label></div></details></div>
@@ -118,7 +125,7 @@ VIDEO_AI_API_KEY=你的密钥</pre><p>也可复制项目的 .env.example 为 .en
 <dialog id="spoken-script-dialog" class="wide-dialog"><div class="dialog-heading"><h2>人工口播稿</h2><button class="close-dialog" aria-label="关闭">×</button></div><p class="muted">这是独立的纯文本稿，不带时间戳。修改和保存不会覆盖原始逐字稿或字幕。</p><label for="spoken-script-text">口播稿</label><textarea id="spoken-script-text" rows="16" maxlength="50000" placeholder="在这里改写为可直接粘贴到剪映或文生音频工具的口播稿"></textarea><div class="copy-actions"><button id="save-spoken-script" class="primary">保存口播稿</button><button id="copy-spoken-script-dialog" class="secondary">复制纯文本</button></div><p id="spoken-script-error" class="error" hidden></p></dialog>
 <dialog id="clip-dialog" class="wide-dialog"><div class="dialog-heading"><h2>截取视频片段</h2><button class="close-dialog" aria-label="关闭">×</button></div><p class="muted">拖动起点或终点时，下方会分别显示对应帧。原视频不会被改写；精准导出会重新编码 MP4，极速无损导出会受关键帧影响。</p><div class="clip-frame-previews"><figure><video id="clip-start-frame" muted playsinline preload="metadata"></video><figcaption>起点帧 <output id="clip-start-frame-time">00:00</output></figcaption></figure><figure><video id="clip-end-frame" muted playsinline preload="metadata"></video><figcaption>终点帧 <output id="clip-end-frame-time">00:00</output></figcaption></figure></div><video id="clip-preview-player" controls preload="metadata" playsinline></video><div class="clip-timeline"><div class="clip-range"><input id="clip-start" type="range" min="0" step="0.01"><input id="clip-end" type="range" min="0" step="0.01"></div><div class="clip-values"><label>开始（秒）<input id="clip-start-input" type="number" min="0" step="0.01"></label><label>结束（秒）<input id="clip-end-input" type="number" min="0" step="0.01"></label><output id="clip-duration"></output></div><div class="copy-actions"><button id="clip-set-start" class="secondary">当前播放位置设为起点</button><button id="clip-set-end" class="secondary">当前播放位置设为终点</button><button id="clip-preview" class="secondary">播放选中片段</button></div></div><div class="copy-controls"><label>导出方式<select id="clip-mode"><option value="precise">精准导出 MP4（推荐）</option><option value="copy">极速无损导出（关键帧可能不准）</option></select></label></div><p id="clip-error" class="error" hidden></p><div class="copy-actions"><button id="clip-export" class="primary">导出片段</button></div><div id="clip-results" class="clip-results"></div></dialog>
 <dialog id="delete-job-dialog"><div class="dialog-heading"><h2>删除这条生成记录？</h2><button class="close-dialog" aria-label="关闭">×</button></div><p>将永久删除本工具保存的逐字稿、人工口播稿、字幕、导出文件和缓存媒体，无法在应用内恢复。</p><p>如果这是“电脑里的视频”，你的原始视频文件不会被删除。</p><button id="confirm-delete-job" class="danger">永久删除</button></dialog>
-<dialog id="recognize-dialog"><div class="dialog-heading"><h2>再听一遍</h2><button class="close-dialog" aria-label="关闭">×</button></div><p class="muted">优先复用已下载的音频。新建一份识别结果，旧稿仍留在历史中，方便对照。</p><div class="advanced"><label>识别档位<select id="redo-profile"><option value="balanced">细致 small</option><option value="accurate">精细 medium（更慢）</option><option value="fast">快速 base</option></select></label><label>语言<select id="redo-language"><option value="">自动</option><option value="zh">中文</option><option value="en">英语</option><option value="ja">日语</option><option value="ko">韩语</option></select></label><label>这段视频中的专业词 / 自造词<input id="redo-terms" maxlength="500" placeholder="例如：光粒级、当量分级、Hopf"></label></div><p id="redo-note" class="muted"></p><button id="confirm-redo" class="primary">开始重新识别</button></dialog>
+<dialog id="recognize-dialog"><div class="dialog-heading"><h2>再听一遍</h2><button class="close-dialog" aria-label="关闭">×</button></div><p class="muted">优先复用已下载的音频。新建一份识别结果，旧稿仍留在历史中，方便对照。</p><div class="advanced"><label>识别档位<select id="redo-profile"><option value="accurate" selected>精细 medium（默认，更慢）</option><option value="balanced">细致 small</option><option value="fast">快速 base</option></select></label><label>语言<select id="redo-language"><option value="">自动</option><option value="zh">中文</option><option value="en">英语</option><option value="ja">日语</option><option value="ko">韩语</option></select></label><label>这段视频中的专业词 / 自造词<input id="redo-terms" maxlength="500" placeholder="例如：光粒级、当量分级、Hopf"></label></div><p id="redo-note" class="muted"></p><button id="confirm-redo" class="primary">开始重新识别</button></dialog>
 <dialog id="storage-dialog" class="wide-dialog"><div class="dialog-heading"><h2>把空间腾出来</h2><button class="close-dialog" aria-label="关闭">×</button></div>
   <div class="path-card">
     <div class="path-head"><h3>文件存放位置</h3><span id="data-dir-badge" class="path-badge" hidden>已自定义</span></div>

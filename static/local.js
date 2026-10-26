@@ -1,14 +1,16 @@
 'use strict';
 let localMode=false;
+let wxChannelMode=false;
 const onlineSubmit=$('job-form').onsubmit;
 const oldRetry=$('retry').onclick;
 function selectSource(local){
-  localMode=local;visible('local-input',local);visible('online-input',!local);
+  localMode=local;wxChannelMode=false;visible('local-input',local);visible('online-input',!local);visible('wx-channel-input',false);
+  $('submit').hidden=false;
   $('url').required=!local;$('local-path').required=local;
   document.querySelector('.composer-heading h1').textContent=local?'把本地视频，存成能读的记录。':'链接发来了，先看看讲了什么。';
   document.querySelector('.composer-heading p').textContent=local?'整理会议、报告和录屏；大文件无需上传。':'粘贴抖音、Bilibili、YouTube 或 TikTok 链接，或直接粘贴整段分享文字。';
   document.querySelector('.platforms').textContent=local?'视频 / 音频':'抖音 / Bilibili / YouTube / TikTok';
-  for(const [id,active] of [['source-online',!local],['source-local',local]]){
+  for(const [id,active] of [['source-online',!local],['source-local',local],['source-wx-channel',false]]){
     $(id).classList.toggle('source-active',active);$(id).setAttribute('aria-pressed',String(active));
   }
   const download=document.querySelector('[name=mode][value=download]');
@@ -18,8 +20,29 @@ function selectSource(local){
   $('retention-label').textContent=local?'完成后删除应用音轨缓存，保留文字、截图与原文件':'完成后删除音视频，保留文字与截图';
   $('retention-hint').textContent=local?'原视频不受影响，仍可回看':'节省空间；之后复听需要重新下载';
 }
+function selectWxChannel(){
+  localMode=false;wxChannelMode=true;visible('local-input',false);visible('online-input',false);visible('wx-channel-input',true);
+  $('submit').hidden=true;
+  $('url').required=false;$('local-path').required=false;
+  document.querySelector('.composer-heading h1').textContent='视频号已经下载好了，直接读内容。';
+  document.querySelector('.composer-heading p').textContent='只显示微信视频号采集器已经完成落盘的视频，不会重新抓取或上传。';
+  document.querySelector('.platforms').textContent='微信视频号 / 本地文件';
+  for(const [id,active] of [['source-online',false],['source-local',false],['source-wx-channel',true]]){
+    $(id).classList.toggle('source-active',active);$(id).setAttribute('aria-pressed',String(active));
+  }
+  const download=document.querySelector('[name=mode][value=download]');download.disabled=true;download.closest('label').hidden=true;
+  const visual=document.querySelector('[name=mode][value=visual]');visual.checked=true;visual.dispatchEvent(new Event('change',{bubbles:true}));
+  $('mode-hint').textContent='导入后只读原下载文件；可生成文字稿、截图和 AI 改写，原文件不会被清理。';
+  $('retention-label').textContent='完成后删除应用音轨缓存，保留原下载视频';
+  $('retention-hint').textContent='采集器下载的原视频不会被工作台删除。';
+  if(typeof loadWxChannelFiles==='function')loadWxChannelFiles();
+}
 $('source-online').onclick=()=>selectSource(false);
 $('source-local').onclick=()=>selectSource(true);
+$('source-wx-channel').onclick=selectWxChannel;
+$('home-online').onclick=()=>{startNewTask();selectSource(false);};
+$('home-local').onclick=()=>{startNewTask();selectSource(true);};
+$('home-wx').onclick=()=>{startNewTask();selectWxChannel();};
 $('pick-local').onclick=async()=>{
   $('pick-local').disabled=true;
   try{const result=await api('/local/pick',{});if(result.path)$('local-path').value=result.path;}
@@ -33,6 +56,7 @@ $('local-notes-file').onchange=async()=>{
   $('local-context').value=text;toast('参考摘要已载入，导入时将与逐字稿分开保存。');
 };
 $('job-form').onsubmit=event=>{
+  if(wxChannelMode){event.preventDefault();toast('请在“已下载的视频号”列表中选择要导入的视频。');return;}
   if(!localMode){onlineSubmit(event);return;}
   event.preventDefault();
   const body={path:$('local-path').value,reference_url:$('local-reference-url').value,context_notes:$('local-context').value,
@@ -51,6 +75,7 @@ document.querySelectorAll('[name=mode]').forEach(input=>input.addEventListener('
 }));
 const onlineNewTask=$('new-task').onclick;
 $('new-task').onclick=()=>{
+  if(wxChannelMode){selectWxChannel();return;}
   if(!localMode){onlineNewTask();return;}
   for(const id of ['local-path','local-context','local-reference-url','local-notes-file'])$(id).value='';
   $('local-path').focus();window.scrollTo({top:0,behavior:'smooth'});

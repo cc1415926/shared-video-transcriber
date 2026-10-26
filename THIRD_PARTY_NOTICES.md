@@ -13,9 +13,13 @@ third-party components under their own terms:
 | OpenCC Python reimplementation | Apache-2.0 |
 | PyInstaller | GPL-2.0-or-later with its bootloader special exception |
 | yt-dlp Python package | Unlicense; review its bundled dependency notices before every release |
+| wx_channel v5.7.13 | MIT License, Copyright (c) 2025 nobiyou; bundled only in the Windows all-in-one installer |
 
-This test package does **not** bundle FFmpeg, Whisper models, or a Playwright
-browser. If a later release bundles FFmpeg, its exact binary build and license
+This package does **not** bundle FFmpeg, Whisper models, or a Playwright
+browser. The Windows installer bundles `wx_channel` v5.7.13 from its official
+release after SHA-256 verification; it is installed to the current user's
+Video Inbox data area and starts only after the user explicitly enables it.
+If a later release bundles FFmpeg, its exact binary build and license
 (LGPL or GPL) must be disclosed and distributed in compliance with that build's
 terms. The current H.264 clip path requests `libx264`, so a GPL FFmpeg build
 cannot be silently labelled as LGPL-only.

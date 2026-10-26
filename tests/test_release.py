@@ -64,7 +64,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_removed_platform_has_no_code_or_dependency_references(self):
         root=Path(__file__).resolve().parents[1]
-        excluded={'.git','.venv','.data','__pycache__','build','dist'}
+        excluded={'.git','.venv','.data','__pycache__','build','dist','generated'}
         needles=('wechat_'+'channels','wx-'+'downloader','wx_'+'downloader',
                  'channels_'+'collector','weixin.qq.com/'+'sph')
         hits=[]

@@ -3,6 +3,7 @@
 #define AppPublisher "Video Inbox"
 #define AppExeName "VideoInbox.exe"
 #define SourceDir GetEnv("VIDEO_INBOX_DIST")
+#define WxChannelSourceDir GetEnv("VIDEO_INBOX_WX_CHANNEL_DIST")
 
 [Setup]
 AppId={{F6F9B088-826D-4C06-862D-026E934E2FD5}
@@ -23,6 +24,10 @@ PrivilegesRequired=lowest
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; wx_channel is MIT-licensed third-party software.  Place it in per-user
+; app data so its downloads, login state and certificate files never land in
+; Program Files or the shared Video Inbox application directory.
+Source: "{#WxChannelSourceDir}\*"; DestDir: "{localappdata}\VideoInbox\wx-channel"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"

@@ -1,7 +1,8 @@
 ﻿[CmdletBinding()]
 param(
     [string]$Version = '',
-    [string]$BundlePath = ''
+    [string]$BundlePath = '',
+    [string]$CollectorPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +18,14 @@ $bundle = [IO.Path]::GetFullPath($BundlePath)
 if (-not (Test-Path -LiteralPath (Join-Path $bundle 'VideoInbox.exe') -PathType Leaf)) {
     throw "未找到 Windows onedir 包：$bundle"
 }
+if (-not $CollectorPath) {
+    $CollectorPath = Join-Path $root 'packaging\generated\wx-channel'
+}
+$collector = [IO.Path]::GetFullPath($CollectorPath)
+if (-not (Test-Path -LiteralPath (Join-Path $collector 'wx_channel.exe') -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path $collector 'web') -PathType Container)) {
+    throw "未找到完整的视频号采集器包：$collector。请先运行 scripts\\prepare_wx_channel_bundle.ps1。"
+}
 $candidates = @(
     (Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source),
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
@@ -27,6 +36,7 @@ if (-not $candidates) {
 }
 $env:VIDEO_INBOX_VERSION = $Version.Trim()
 $env:VIDEO_INBOX_DIST = $bundle
+$env:VIDEO_INBOX_WX_CHANNEL_DIST = $collector
 & $candidates[0] (Join-Path $root 'packaging\windows\VideoInbox.iss')
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup 编译失败：$LASTEXITCODE" }
 $installer = Join-Path $root 'dist\installers\VideoInbox-Setup-Windows-x64.exe'

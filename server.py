@@ -82,6 +82,10 @@ _ALLOWED_MODELS = {"tiny", "base", "small", "medium", "large-v3"}
 _DETAIL_RESPONSE_TIMEOUT = 18.0
 
 
+class UnsupportedDouyinShareLink(ValueError):
+    """The URL is a valid Douyin share, but it does not identify one video."""
+
+
 def _playwright_chromium_executable() -> str | None:
     """Prefer an explicit or normally installed compatible Chromium browser.
 
@@ -327,12 +331,33 @@ def _douyin_share_page_candidates(original_url: str, final_url: str) -> list[str
     return result
 
 
+def _reject_non_video_douyin_share(final_url: str) -> None:
+    """Explain common Douyin share links that cannot select a single video."""
+    path = urlparse(final_url).path.rstrip('/').lower()
+    if '/share/user/' in path or path.startswith('/user/'):
+        raise UnsupportedDouyinShareLink(
+            '你粘贴的是抖音作者主页链接（分享文案通常写着“查看TA的更多作品”），不是单条视频。'
+            '请在抖音里打开要处理的那条视频，点击“分享”→“复制链接”，再粘贴到这里。'
+        )
+    if '/share/challenge/' in path or path.startswith('/challenge/'):
+        raise UnsupportedDouyinShareLink(
+            '你粘贴的是抖音话题页链接，不是单条视频。请打开要处理的具体视频，点击“分享”→“复制链接”。'
+        )
+    if '/share/music/' in path or path.startswith('/music/'):
+        raise UnsupportedDouyinShareLink(
+            '你粘贴的是抖音音乐页链接，不是单条视频。请打开要处理的具体视频，点击“分享”→“复制链接”。'
+        )
+
+
 def _get_video_object_from_share_page_sync(page_url: str) -> dict:
     errors: list[str] = []
     first_html = ""
     final_url = page_url
     try:
         first_html, final_url = _read_url_text_sync(page_url)
+        _reject_non_video_douyin_share(final_url)
+    except UnsupportedDouyinShareLink:
+        raise
     except Exception as e:
         errors.append(f"{page_url}: {type(e).__name__}")
 
@@ -360,6 +385,8 @@ async def _get_douyin_video_object(page_url: str) -> dict:
         return await loop.run_in_executor(
             _DOWNLOAD_EXECUTOR, _get_video_object_from_share_page_sync, page_url
         )
+    except UnsupportedDouyinShareLink:
+        raise
     except Exception as e:
         share_error = e
 
@@ -1430,7 +1457,7 @@ async def transcribe_video(file_path: str, model_size: str = WHISPER_MODEL) -> s
 
 
 @mcp.tool()
-async def inspect_shared_video(url: str, mode: str = 'transcript', profile: str = 'balanced') -> dict:
+async def inspect_shared_video(url: str, mode: str = 'transcript', profile: str = 'accurate') -> dict:
     """推荐：读取朋友分享的平台视频，返回持久任务 ID。
 
     需要本地视频收件箱 app.py 已启动。mode: transcript（声音文字，最快）/
@@ -1455,7 +1482,7 @@ async def get_video_job(job_id: str) -> dict:
 
 
 @mcp.tool()
-async def inspect_local_video(path: str, mode: str = 'visual', profile: str = 'balanced',
+async def inspect_local_video(path: str, mode: str = 'visual', profile: str = 'accurate',
                               language: str | None = None, hotwords: str = '',
                               reference_url: str = '', context_notes: str = '') -> dict:
     """分析用户明确选定的本机视频/音频；必须由用户提供或授权这个路径，不扫描私人文件。

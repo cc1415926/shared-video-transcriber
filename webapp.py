@@ -1,9 +1,14 @@
 import asyncio
+import ctypes
 import io
+import json
 import logging
 import os
+import re
 import secrets
 import shutil
+import socket
+import time
 import webbrowser
 import zipfile
 from contextlib import asynccontextmanager
@@ -20,11 +25,12 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from library import Library
 from local_media import pick_file, pick_directory, original_path
 from restart import schedule_restart
-from runtime_paths import (data_dir_state, default_data_dir, executable, prepare_runtime,
+from runtime_paths import (data_dir_state, default_data_dir, executable, is_frozen, prepare_runtime,
                            read_bootstrap, resource_dir, user_data_dir, write_bootstrap)
 from version import __version__
 
 BASE = resource_dir()
+WX_CHANNEL_MEDIA_EXTENSIONS = {'.mp4', '.mkv', '.mov', '.webm', '.avi', '.m4v'}
 
 
 def transport_errors(loop, context):
@@ -84,7 +90,7 @@ async def local_guard(request: Request, call_next):
 
 class JobInput(BaseModel):
     url: str = Field(min_length=1, max_length=8000)
-    profile: Literal['fast', 'balanced', 'accurate'] = 'balanced'
+    profile: Literal['fast', 'balanced', 'accurate'] = 'accurate'
     mode: Literal['transcript', 'visual', 'download'] = 'transcript'
     language: Literal['zh', 'en', 'ja', 'ko'] | None = None
     hotwords: str = Field(default='', max_length=500)
@@ -93,14 +99,14 @@ class JobInput(BaseModel):
 
 
 class RerecognizeInput(BaseModel):
-    profile: Literal['fast','balanced','accurate'] = 'balanced'
+    profile: Literal['fast','balanced','accurate'] = 'accurate'
     language: Literal['zh','en','ja','ko'] | None = None
     hotwords: str = Field(default='',max_length=500)
 
 
 class LocalJobInput(BaseModel):
     path: str = Field(min_length=1,max_length=4096)
-    profile: Literal['fast','balanced','accurate'] = 'balanced'
+    profile: Literal['fast','balanced','accurate'] = 'accurate'
     mode: Literal['transcript','visual'] = 'visual'
     language: Literal['zh','en','ja','ko'] | None = None
     hotwords: str = Field(default='',max_length=500)
@@ -108,6 +114,22 @@ class LocalJobInput(BaseModel):
     cleanup_after: bool = False
     reference_url: str = Field(default='',max_length=2000)
     context_notes: str = Field(default='',max_length=8000)
+
+
+class WxChannelImportInput(BaseModel):
+    # Relative is intentional: this route can only import downloader output,
+    # never an arbitrary path from the browser.
+    relative_path: str = Field(min_length=1, max_length=4096)
+    profile: Literal['fast', 'balanced', 'accurate'] = 'accurate'
+    mode: Literal['transcript', 'visual'] = 'visual'
+    language: Literal['zh', 'en', 'ja', 'ko'] | None = None
+    hotwords: str = Field(default='', max_length=500)
+    force: bool = False
+    cleanup_after: bool = False
+
+
+class WxChannelRemoveInput(BaseModel):
+    relative_path: str = Field(min_length=1, max_length=4096)
 
 
 class SegmentChange(BaseModel):
@@ -207,6 +229,187 @@ def choose_local_directory():
 @app.post('/api/local/jobs',status_code=202)
 def create_local_job(body: LocalJobInput, request: Request):
     return request.app.state.library.submit_local(**body.model_dump())
+
+
+def _wx_title(stem: str) -> str:
+    return re.split(r'_xWT\d+(?:_\d+x\d+)?$', stem, maxsplit=1)[0] or stem
+
+
+def _wx_channel_paths() -> tuple[Path | None, Path | None]:
+    """Resolve configured paths, or the collector installed with the Windows app."""
+    home = os.environ.get('WX_CHANNEL_HOME', '').strip()
+    downloads = os.environ.get('WX_CHANNEL_DOWNLOADS_DIR', '').strip()
+    executable = os.environ.get('WX_CHANNEL_EXECUTABLE', '').strip()
+    root = Path(home).expanduser() if home else None
+    if not root and is_frozen() and os.name == 'nt':
+        # The all-in-one Windows installer puts this third-party component in
+        # the user's writable app-data directory.  It must not run from, or
+        # write downloads into, the read-only Program Files application folder.
+        root = default_data_dir() / 'wx-channel'
+    download_path = Path(downloads).expanduser() if downloads else (root / 'downloads' if root else None)
+    executable_path = Path(executable).expanduser() if executable else (root / 'wx_channel.exe' if root else None)
+    return (download_path.resolve() if download_path else None,
+            executable_path.resolve() if executable_path else None)
+
+
+def _wx_channel_is_bundled_default() -> bool:
+    return (is_frozen() and os.name == 'nt'
+            and not os.environ.get('WX_CHANNEL_HOME', '').strip()
+            and not os.environ.get('WX_CHANNEL_DOWNLOADS_DIR', '').strip()
+            and not os.environ.get('WX_CHANNEL_EXECUTABLE', '').strip())
+
+
+def _wx_channel_file(relative_path: str) -> Path:
+    downloads_root, _ = _wx_channel_paths()
+    if not downloads_root:
+        raise ValueError('尚未配置微信视频号采集器的下载目录')
+    relative = Path(relative_path)
+    if relative.is_absolute() or '..' in relative.parts:
+        raise ValueError('微信视频号导入路径无效')
+    candidate = (downloads_root / relative).resolve()
+    try:
+        candidate.relative_to(downloads_root)
+    except ValueError as exc:
+        raise ValueError('只能导入微信视频号下载目录中的文件') from exc
+    if not candidate.is_file() or candidate.suffix.lower() not in WX_CHANNEL_MEDIA_EXTENSIONS:
+        raise ValueError('文件不存在，或不是可导入的视频文件')
+    return candidate
+
+
+def _wx_channel_online() -> bool:
+    try:
+        with socket.create_connection(('127.0.0.1', 2025), timeout=.5):
+            return True
+    except OSError:
+        return False
+
+
+def _wx_inbox_state(root: Path) -> tuple[Path, dict]:
+    path = root / 'wx-channel-inbox.json'
+    try:
+        state = json.loads(path.read_text(encoding='utf-8'))
+        if not isinstance(state, dict) or not isinstance(state.get('removed', []), list):
+            raise ValueError('invalid state')
+    except (OSError, ValueError, json.JSONDecodeError):
+        state = {'removed': []}
+    return path, state
+
+
+def _save_wx_inbox_state(path: Path, state: dict) -> None:
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
+    temporary.replace(path)
+
+
+@app.get('/api/wx-channel/status')
+def wx_channel_status():
+    downloads_root, executable_path = _wx_channel_paths()
+    return {'running': _wx_channel_online(),
+            'downloads_configured': downloads_root is not None,
+            'executable_configured': executable_path is not None,
+            'executable_found': bool(executable_path and executable_path.is_file()),
+            'bundled': _wx_channel_is_bundled_default(),
+            'downloads_root': str(downloads_root) if downloads_root else '',
+            'executable_path': str(executable_path) if executable_path else ''}
+
+
+@app.post('/api/wx-channel/start')
+def start_wx_channel():
+    downloads_root, executable_path = _wx_channel_paths()
+    if _wx_channel_online():
+        return {'running': True, 'already_running': True, 'message': '视频号下载功能已启动'}
+    if os.name != 'nt':
+        raise ValueError('微信视频号采集器目前仅支持 Windows')
+    if not executable_path or not executable_path.is_file():
+        raise ValueError('未配置或未找到微信视频号下载程序。请按使用指南配置 WX_CHANNEL_HOME。')
+    if downloads_root:
+        downloads_root.mkdir(parents=True, exist_ok=True)
+    # Use Windows' own elevation prompt. The executable and directory are fixed
+    # application paths; no browser-provided value is ever executed here.
+    result = ctypes.windll.shell32.ShellExecuteW(
+        None, 'runas', str(executable_path), None, str(executable_path.parent), 1,
+    )
+    if int(result) <= 32:
+        if int(result) == 1223:
+            raise ValueError('已取消管理员确认。视频号下载功能未启动。')
+        raise ValueError(f'无法请求管理员启动视频号下载功能（Windows 错误 {int(result)}）。')
+    return {'running': False, 'starting': True,
+            'message': 'Windows 管理员确认框已打开。请点击“是”；启动后下载按钮会出现在视频号页面。'}
+
+
+@app.get('/api/wx-channel/files')
+def wx_channel_files(request: Request):
+    """List completed local downloads without relying on the downloader DB."""
+    state_path, state = _wx_inbox_state(request.app.state.library.root)
+    removed = set(state['removed'])
+    items = []
+    downloads_root, executable_path = _wx_channel_paths()
+    if not downloads_root or not downloads_root.is_dir():
+        return {'root': str(downloads_root) if downloads_root else '', 'available': False, 'items': [],
+                'running': _wx_channel_online(), 'removed_count': len(removed),
+                'downloads_configured': downloads_root is not None,
+                'executable_found': bool(executable_path and executable_path.is_file()),
+                'bundled': _wx_channel_is_bundled_default()}
+    for path in downloads_root.rglob('*'):
+        if not path.is_file() or path.suffix.lower() not in WX_CHANNEL_MEDIA_EXTENSIONS:
+            continue
+        try:
+            stat = path.stat()
+            relative = path.relative_to(downloads_root)
+        except (OSError, ValueError):
+            continue
+        if stat.st_size <= 0 or time.time() - stat.st_mtime < 2:
+            continue
+        relative_text = str(relative)
+        if relative_text in removed:
+            continue
+        author = relative.parts[0] if len(relative.parts) > 1 else '未分类视频号'
+        quality = re.search(r'_(xWT\d+(?:_\d+x\d+)?)$', path.stem)
+        items.append({'relative_path': relative_text, 'title': _wx_title(path.stem),
+                      'author': author, 'quality': quality.group(1) if quality else 'MP4',
+                      'size': stat.st_size, 'modified': stat.st_mtime})
+    items.sort(key=lambda item: item['modified'], reverse=True)
+    return {'root': str(downloads_root), 'available': True, 'items': items,
+            'running': _wx_channel_online(), 'removed_count': len(removed),
+            'downloads_configured': True, 'executable_found': bool(executable_path and executable_path.is_file()),
+            'bundled': _wx_channel_is_bundled_default()}
+
+
+@app.post('/api/wx-channel/remove')
+def remove_wx_channel_file(body: WxChannelRemoveInput, request: Request):
+    # Resolve and validate first: this endpoint can only delete one media file
+    # rooted under the fixed downloader directory.
+    media_file = _wx_channel_file(body.relative_path)
+    downloads_root, _ = _wx_channel_paths()
+    relative = str(media_file.relative_to(downloads_root))
+    size = media_file.stat().st_size
+    try:
+        media_file.unlink()
+    except OSError as exc:
+        raise HTTPException(status_code=409, detail=f'无法删除下载文件：{exc}') from exc
+    with request.app.state.library.lock:
+        state_path, state = _wx_inbox_state(request.app.state.library.root)
+        if relative not in state['removed']:
+            state['removed'].append(relative)
+            _save_wx_inbox_state(state_path, state)
+    return {'removed': True, 'deleted_bytes': size,
+            'message': '已从收件箱删除，并永久删除了对应的原始视频下载文件。'}
+
+
+@app.post('/api/wx-channel/import', status_code=202)
+def import_wx_channel_file(body: WxChannelImportInput, request: Request):
+    path = _wx_channel_file(body.relative_path)
+    downloads_root, _ = _wx_channel_paths()
+    relative = path.relative_to(downloads_root)
+    author = relative.parts[0] if len(relative.parts) > 1 else '未分类视频号'
+    quality = re.search(r'_(xWT\d+(?:_\d+x\d+)?)$', path.stem)
+    return request.app.state.library.submit_local(
+        path=str(path), profile=body.profile, mode=body.mode, language=body.language,
+        hotwords=body.hotwords, force=body.force, cleanup_after=body.cleanup_after,
+        source_platform='wxchannels',
+        source_metadata={'title': _wx_title(path.stem), 'author': author,
+                         'quality': quality.group(1) if quality else 'MP4'},
+    )
 
 
 @app.get('/api/jobs/{jid}/original')

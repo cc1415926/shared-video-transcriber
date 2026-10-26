@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 import server
 import recognition
 from library import Library, stamp
-from webapp import app, transport_errors
+from webapp import _wx_channel_paths, app, transport_errors
 import summaries
 
 
@@ -77,6 +77,45 @@ class UrlTests(unittest.TestCase):
             path, platform = asyncio.run(server._download_video_file('https://vm.tiktok.com/ZMexample/', root))
             self.assertEqual(platform, 'tiktok')
             self.assertTrue(Path(path).is_file())
+
+    def test_douyin_creator_share_is_rejected_with_actionable_message(self):
+        creator_url = 'https://www.iesdouyin.com/share/user/example?from_ssr=1'
+        with patch.object(server, '_read_url_text_sync', return_value=('<html></html>', creator_url)):
+            with self.assertRaisesRegex(server.UnsupportedDouyinShareLink, '作者主页链接'):
+                server._get_video_object_from_share_page_sync('https://v.douyin.com/example/')
+
+    def test_douyin_video_share_still_uses_page_parser(self):
+        video_url = 'https://www.iesdouyin.com/share/video/123/'
+        payload = {
+            'aweme_detail': {
+                'video': {'play_addr': {'url_list': ['https://cdn.test/video.mp4']}, 'duration': 1000}
+            }
+        }
+        html = '<script>window._ROUTER_DATA = ' + json.dumps(payload) + '</script>'
+        with patch.object(server, '_read_url_text_sync', return_value=(html, video_url)):
+            video = server._get_video_object_from_share_page_sync('https://v.douyin.com/example/')
+        self.assertEqual(video['duration'], 1000)
+
+    def test_wx_channel_paths_are_per_user_configuration(self):
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {
+            'WX_CHANNEL_HOME': root,
+            'WX_CHANNEL_DOWNLOADS_DIR': '',
+            'WX_CHANNEL_EXECUTABLE': '',
+        }, clear=False):
+            downloads, executable = _wx_channel_paths()
+        self.assertEqual(downloads, (Path(root) / 'downloads').resolve())
+        self.assertEqual(executable, (Path(root) / 'wx_channel.exe').resolve())
+
+    def test_frozen_windows_uses_installed_collector_without_env(self):
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {
+            'WX_CHANNEL_HOME': '',
+            'WX_CHANNEL_DOWNLOADS_DIR': '',
+            'WX_CHANNEL_EXECUTABLE': '',
+        }, clear=False), patch('webapp.is_frozen', return_value=True), \
+                patch('webapp.default_data_dir', return_value=Path(root)):
+            downloads, executable = _wx_channel_paths()
+        self.assertEqual(downloads, (Path(root) / 'wx-channel' / 'downloads').resolve())
+        self.assertEqual(executable, (Path(root) / 'wx-channel' / 'wx_channel.exe').resolve())
 
 
 async def fake_download(url, directory, on_progress=None):

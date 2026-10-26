@@ -6,11 +6,11 @@ const state = {token:'',health:null,jobs:[],selected:/^[a-f0-9]{32}$/.test(reque
 const fmt = sec => {const n=Math.max(0,Math.floor(sec||0));return (n>=3600?Math.floor(n/3600)+':':'')+String(Math.floor(n/60)%60).padStart(2,'0')+':'+String(n%60).padStart(2,'0');};
 const mb = n => ((n||0)/1048576).toFixed(1)+' MB';
 const labels = {done:'已完成',running:'处理中',queued:'排队中',cancelling:'正在停止',cancelled:'已取消',error:'失败',interrupted:'已中断'};
-const platformLabel = value => ({douyin:'抖音',bilibili:'Bilibili',youtube:'YouTube',tiktok:'TikTok',local:'本地文件'}[value]||value);
+const platformLabel = value => ({douyin:'抖音',bilibili:'Bilibili',youtube:'YouTube',tiktok:'TikTok',local:'本地文件',wxchannels:'微信视频号'}[value]||value);
 function node(tag,text,className){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(className)el.className=className;return el;}
 function visible(id,show){$(id).hidden=!show;}
-function showPage(page){state.page=page;visible('home',page==='home');document.querySelector('.composer').hidden=page!=='workspace';visible('result',page==='workspace'&&!!state.job);document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));if(page==='workspace')$('composer-title').scrollIntoView({block:'start',behavior:'smooth'});}
-function startNewTask(){state.selected=null;state.job=null;state.lastRender='';localStorage.removeItem('video.selected');showPage('workspace');visible('result',false);$('url').value='';$('url').focus();window.scrollTo({top:0,behavior:'smooth'});}
+function showPage(page){state.page=page;visible('home',page==='home');document.querySelector('.composer').hidden=page!=='workspace';visible('result',page==='workspace'&&!!state.job);visible('empty',false);document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));if(page==='workspace')$('composer-title').scrollIntoView({block:'start',behavior:'smooth'});}
+function startNewTask(){state.selected=null;state.job=null;state.lastRender='';localStorage.removeItem('video.selected');showPage('workspace');visible('result',false);visible('empty',false);$('url').value='';$('url').focus();window.scrollTo({top:0,behavior:'smooth'});}
 function toast(text){$('toast').textContent=text;visible('toast',true);clearTimeout(toast.timer);toast.timer=setTimeout(()=>visible('toast',false),3200);}
 async function api(path,body){
   let response;
