@@ -106,6 +106,7 @@ class UrlTests(unittest.TestCase):
         self.assertEqual(downloads, (Path(root) / 'downloads').resolve())
         self.assertEqual(executable, (Path(root) / 'wx_channel.exe').resolve())
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows installer behavior')
     def test_frozen_windows_uses_installed_collector_without_env(self):
         with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {
             'WX_CHANNEL_HOME': '',

@@ -8,7 +8,14 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $Version) {
-    $Version = & (Join-Path $root '.venv\Scripts\python.exe') -c "from version import __version__;print(__version__)"
+    $projectPython = Join-Path $root '.venv\Scripts\python.exe'
+    if (Test-Path -LiteralPath $projectPython -PathType Leaf) {
+        $Version = & $projectPython -c "from version import __version__;print(__version__)"
+    } else {
+        # GitHub Actions uses the Python installed by actions/setup-python, not
+        # a project-local virtual environment.
+        $Version = & python -c "from version import __version__;print(__version__)"
+    }
 }
 if (-not $BundlePath) {
     & (Join-Path $root '.venv\Scripts\python.exe') (Join-Path $root 'scripts\build_package.py')
